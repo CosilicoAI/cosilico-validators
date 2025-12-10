@@ -1,0 +1,88 @@
+# EITC Test Cases - 2024 Tax Year
+# Based on 26 USC § 32
+
+test_cases:
+  # Phase-in region tests (no children)
+  - name: "EITC single, no children, phase-in start"
+    inputs:
+      earned_income: 5000
+      filing_status: SINGLE
+      eitc_qualifying_children_count: 0
+      state: CA
+    expected:
+      eitc: 385  # 7.65% × $5,000 = $382.50
+    citation: "26 USC § 32(b)(1)(A) - Phase-in rate 7.65%"
+
+  - name: "EITC single, no children, near maximum"
+    inputs:
+      earned_income: 8000
+      filing_status: SINGLE
+      eitc_qualifying_children_count: 0
+      state: CA
+    expected:
+      eitc: 600  # Max credit for no children 2024
+    citation: "26 USC § 32(b)(2)(A)"
+
+  # One child tests
+  - name: "EITC single, one child, phase-in"
+    inputs:
+      earned_income: 10000
+      filing_status: SINGLE
+      eitc_qualifying_children_count: 1
+      state: CA
+    expected:
+      eitc: 3400  # 34% × $10,000 = $3,400
+    citation: "26 USC § 32(b)(1)(A) - Phase-in rate 34%"
+
+  - name: "EITC single, one child, plateau"
+    inputs:
+      earned_income: 15000
+      filing_status: SINGLE
+      eitc_qualifying_children_count: 1
+      state: CA
+    expected:
+      eitc: 4213  # Max credit for one child 2024
+    citation: "26 USC § 32(b)(2)(A)"
+
+  # Two children tests
+  - name: "EITC single, two children, maximum credit"
+    inputs:
+      earned_income: 18000
+      filing_status: SINGLE
+      eitc_qualifying_children_count: 2
+      state: CA
+    expected:
+      eitc: 6960  # Max credit for two children 2024
+    citation: "26 USC § 32(b)(2)(A)"
+
+  # Three+ children tests
+  - name: "EITC single, three children, maximum credit"
+    inputs:
+      earned_income: 18000
+      filing_status: SINGLE
+      eitc_qualifying_children_count: 3
+      state: CA
+    expected:
+      eitc: 7830  # Max credit for three+ children 2024
+    citation: "26 USC § 32(b)(2)(A)"
+
+  # Joint filer tests
+  - name: "EITC joint, no children, maximum"
+    inputs:
+      earned_income: 10000
+      filing_status: JOINT
+      eitc_qualifying_children_count: 0
+      state: CA
+    expected:
+      eitc: 600
+    citation: "26 USC § 32(b)(2)(A)"
+
+  - name: "EITC joint, two children, plateau"
+    inputs:
+      earned_income: 25000
+      filing_status: JOINT
+      eitc_qualifying_children_count: 2
+      state: CA
+    expected:
+      eitc: 6960  # Max credit in plateau region
+    citation: "26 USC § 32(b)(2)(A)"

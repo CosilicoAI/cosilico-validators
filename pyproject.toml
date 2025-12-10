@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cosilico-validators"
+version = "0.1.0"
+description = "Multi-system tax/benefit validation for Cosilico DSL encodings"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = {text = "MIT"}
+authors = [
+    {name = "Cosilico", email = "hello@cosilico.ai"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "requests>=2.28",
+    "rich>=13.0",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+policyengine = [
+    "policyengine-us>=1.45",
+    "policyengine-core>=3.20",
+]
+taxsim = [
+    # TAXSIM accessed via web service, no package needed
+]
+psl = [
+    "taxcalc>=4.0",
+]
+all = [
+    "cosilico-validators[policyengine,psl]",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+cosilico-validators = "cosilico_validators.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/CosilicoAI/cosilico-validators"
+"Bug Tracker" = "https://github.com/CosilicoAI/cosilico-validators/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cosilico_validators"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
