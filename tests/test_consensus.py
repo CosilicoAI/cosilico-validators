@@ -1,13 +1,14 @@
 """Tests for consensus engine."""
 
 import pytest
+
 from cosilico_validators import (
+    BaseValidator,
     ConsensusEngine,
     ConsensusLevel,
     TestCase,
     ValidatorResult,
     ValidatorType,
-    BaseValidator,
 )
 
 

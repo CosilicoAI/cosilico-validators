@@ -1,7 +1,7 @@
 """GitHub issue filing for upstream bug reports."""
 
-import os
 import json
+import os
 from dataclasses import dataclass
 from typing import Any
 

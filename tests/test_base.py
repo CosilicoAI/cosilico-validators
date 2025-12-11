@@ -1,6 +1,5 @@
 """Tests for base validator types."""
 
-import pytest
 from cosilico_validators import TestCase, ValidatorResult, ValidatorType
 
 

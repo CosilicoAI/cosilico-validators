@@ -1,15 +1,15 @@
 """CLI for cosilico-validators."""
 
 import json
-import click
 from pathlib import Path
+
+import click
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
-from cosilico_validators.validators.base import TestCase
 from cosilico_validators.consensus.engine import ConsensusEngine, ConsensusLevel
-
+from cosilico_validators.validators.base import TestCase
 
 console = Console()
 

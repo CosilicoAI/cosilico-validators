@@ -61,11 +61,12 @@ Homepage = "https://github.com/CosilicoAI/cosilico-validators"
 packages = ["src/cosilico_validators"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "SIM"]
+ignore = ["E501", "B905", "SIM115"]  # Allow long lines, zip without strict, tempfile pattern
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -244,7 +244,7 @@ class ConsensusEngine:
         # Add reward for matching expected value
         matches = 0
         total_weight = 0
-        for name, result in results.items():
+        for _name, result in results.items():
             if result.success and result.calculated_value is not None:
                 weight = self.primary_weight if result.validator_type == ValidatorType.PRIMARY else 1.0
                 total_weight += weight
