@@ -157,8 +157,10 @@ class TaxsimValidator(BaseValidator):
             "earned_income": "pwages",
             "employment_income": "pwages",
             "wages": "pwages",
+            "agi": "pwages",  # Use wages as proxy for AGI
             "spouse_wages": "swages",
             "qualifying_children": "depx",
+            "qualifying_children_under_17": "depx",
             "eitc_qualifying_children_count": "depx",
             "num_children": "depx",
             "children": "depx",
