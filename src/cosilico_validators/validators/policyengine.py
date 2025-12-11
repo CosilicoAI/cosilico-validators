@@ -97,6 +97,9 @@ class PolicyEngineValidator(BaseValidator):
             "qualifying_children_under_17": lambda v: self._add_children(
                 situation, v, year_str
             ),
+            "ctc_qualifying_children": lambda v: self._add_children(
+                situation, v, year_str
+            ),
             "agi": lambda v: self._set_person_var(
                 situation, "employment_income", v, year_str
             ),

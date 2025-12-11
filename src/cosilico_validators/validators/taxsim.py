@@ -161,6 +161,7 @@ class TaxsimValidator(BaseValidator):
             "spouse_wages": "swages",
             "qualifying_children": "depx",
             "qualifying_children_under_17": "depx",
+            "ctc_qualifying_children": "depx",
             "eitc_qualifying_children_count": "depx",
             "num_children": "depx",
             "children": "depx",
