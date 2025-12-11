@@ -1,0 +1,2 @@
+# Ignore TAXSIM executables (download from NBER)
+taxsim35-*.exe

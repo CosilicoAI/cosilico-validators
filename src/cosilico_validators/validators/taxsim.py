@@ -11,8 +11,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
-
 from cosilico_validators.validators.base import (
     BaseValidator,
     TestCase,
@@ -160,6 +158,7 @@ class TaxsimValidator(BaseValidator):
             "employment_income": "pwages",
             "wages": "pwages",
             "spouse_wages": "swages",
+            "qualifying_children": "depx",
             "eitc_qualifying_children_count": "depx",
             "num_children": "depx",
             "children": "depx",
@@ -287,9 +286,21 @@ class TaxsimValidator(BaseValidator):
         return None
 
     def validate(
-        self, test_case: TestCase, variable: str, year: int = 2024
+        self, test_case: TestCase, variable: str, year: int = 2023
     ) -> ValidatorResult:
-        """Run validation using local TAXSIM executable."""
+        """Run validation using local TAXSIM executable.
+
+        Note: TAXSIM-35 only supports tax years 1960-2023.
+        """
+        # Validate year is within TAXSIM's supported range
+        if year < 1960 or year > 2023:
+            return ValidatorResult(
+                validator_name=self.name,
+                validator_type=self.validator_type,
+                calculated_value=None,
+                error=f"TAXSIM-35 only supports tax years 1960-2023, got {year}",
+            )
+
         var_lower = variable.lower()
         if var_lower not in TAXSIM_OUTPUT_VARS:
             return ValidatorResult(

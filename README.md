@@ -1,10 +1,38 @@
 # cosilico-validators
 
-Multi-system tax/benefit validation framework for Cosilico DSL encodings.
+External validation framework for Cosilico DSL encodings.
+
+## Tests vs Validation
+
+**This tool is for external validation, not testing.**
+
+| Aspect | Tests (in cosilico-us) | Validation (this repo) |
+|--------|------------------------|------------------------|
+| Purpose | Verify encoding matches statute | Compare against external tools |
+| Authority | Authoritative—our truth | Informational—tools may have bugs |
+| Approach | TDD—test-first development | Audit—report consistency |
+| Output | Pass/Fail | Comparison report with disagreements |
+| Location | `cosilico-us/26/32/tests/` | `cosilico-validators` |
+
+Example validation output:
+```
+EITC Validation Report vs TAXSIM-35 (TY 2023)
+═════════════════════════════════════════════
+Agreement: 12/13 (92%)
+
+Disagreements:
+┌─────────────────────┬──────────┬────────┬─────────────────────────────┐
+│ Case                │ Cosilico │ TAXSIM │ Explanation                 │
+├─────────────────────┼──────────┼────────┼─────────────────────────────┤
+│ Childless, age 23   │ $0       │ $600   │ TAXSIM bug: ignores age req │
+│                     │          │        │ See: 26 USC § 32(c)(1)(A)   │
+│                     │          │        │ Issue: PE/taxsim#662        │
+└─────────────────────┴──────────┴────────┴─────────────────────────────┘
+```
 
 ## Overview
 
-`cosilico-validators` validates tax and benefit calculations against multiple authoritative systems to compute a **consensus-based reward signal** for training AI encoding systems. When Claude encodes tax law into DSL and is highly confident, but validators disagree, it can automatically file issues to upstream repositories.
+`cosilico-validators` compares Cosilico calculations against external systems (TAXSIM, PolicyEngine, TaxAct) to generate **validation reports**. These reports document both agreements and disagreements—with statute citations explaining where we believe external tools are incorrect.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐

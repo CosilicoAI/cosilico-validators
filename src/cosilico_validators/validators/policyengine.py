@@ -158,10 +158,7 @@ class PolicyEngineValidator(BaseValidator):
             value = sim.calculate(pe_variable, year)
 
             # Handle array output
-            if hasattr(value, "__len__") and len(value) > 0:
-                calculated = float(value[0])
-            else:
-                calculated = float(value)
+            calculated = float(value[0]) if hasattr(value, "__len__") and len(value) > 0 else float(value)
 
             return ValidatorResult(
                 validator_name=self.name,
