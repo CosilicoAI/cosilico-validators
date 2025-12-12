@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Dict, List, Optional, Set
 
 
 class ValidatorType(Enum):
@@ -19,10 +19,10 @@ class TestCase:
     """A single test case for validation."""
 
     name: str
-    inputs: dict[str, Any]
-    expected: dict[str, float]
-    citation: str | None = None
-    notes: str | None = None
+    inputs: Dict[str, Any]
+    expected: Dict[str, float]
+    citation: Optional[str] = None
+    notes: Optional[str] = None
 
 
 @dataclass
@@ -31,9 +31,9 @@ class ValidatorResult:
 
     validator_name: str
     validator_type: ValidatorType
-    calculated_value: float | None
-    error: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    calculated_value: Optional[float]
+    error: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def success(self) -> bool:
@@ -45,7 +45,7 @@ class BaseValidator(ABC):
 
     name: str
     validator_type: ValidatorType
-    supported_variables: set[str]
+    supported_variables: Set[str]
 
     @abstractmethod
     def validate(
@@ -69,8 +69,8 @@ class BaseValidator(ABC):
         pass
 
     def batch_validate(
-        self, test_cases: list[TestCase], variable: str, year: int = 2024
-    ) -> list[ValidatorResult]:
+        self, test_cases: List[TestCase], variable: str, year: int = 2024
+    ) -> List[ValidatorResult]:
         """Validate multiple test cases.
 
         Default implementation calls validate() sequentially.

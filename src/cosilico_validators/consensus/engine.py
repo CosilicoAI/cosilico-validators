@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple
 
 from cosilico_validators.validators.base import (
     BaseValidator,
@@ -29,12 +29,12 @@ class ValidationResult:
     test_case: TestCase
     variable: str
     expected_value: float
-    validator_results: dict[str, ValidatorResult]
+    validator_results: Dict[str, ValidatorResult]
     consensus_level: ConsensusLevel
-    consensus_value: float | None
+    consensus_value: Optional[float]
     reward_signal: float  # -1.0 to 1.0
     confidence: float  # 0.0 to 1.0
-    potential_bugs: list[dict[str, Any]] = field(default_factory=list)
+    potential_bugs: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def matches_expected(self) -> bool:
@@ -64,7 +64,7 @@ class ConsensusEngine:
 
     def __init__(
         self,
-        validators: list[BaseValidator],
+        validators: List[BaseValidator],
         tolerance: float = 15.0,
         primary_weight: float = 2.0,
     ):
@@ -92,7 +92,7 @@ class ConsensusEngine:
         test_case: TestCase,
         variable: str,
         year: int = 2024,
-        claude_confidence: float | None = None,
+        claude_confidence: Optional[float] = None,
     ) -> ValidationResult:
         """Run validation across all validators and compute consensus.
 
@@ -116,7 +116,7 @@ class ConsensusEngine:
             expected_value = list(test_case.expected.values())[0] if test_case.expected else 0
 
         # Run all validators
-        validator_results: dict[str, ValidatorResult] = {}
+        validator_results: Dict[str, ValidatorResult] = {}
         for validator in self.validators:
             if validator.supports_variable(variable):
                 result = validator.validate(test_case, variable, year)
@@ -154,13 +154,13 @@ class ConsensusEngine:
 
     def _compute_consensus(
         self,
-        results: dict[str, ValidatorResult],
+        results: Dict[str, ValidatorResult],
         expected: float,
-        claude_confidence: float | None,
-    ) -> tuple[float | None, ConsensusLevel]:
+        claude_confidence: Optional[float],
+    ) -> tuple[Optional[float], ConsensusLevel]:
         """Compute consensus value and level from validator results."""
         # Get successful results with values
-        values: list[tuple[str, float, ValidatorType]] = []
+        values: List[tuple[str, float, ValidatorType]] = []
         for name, result in results.items():
             if result.success and result.calculated_value is not None:
                 values.append((name, result.calculated_value, result.validator_type))
@@ -190,7 +190,7 @@ class ConsensusEngine:
 
         # Check for majority agreement
         # Group values by similarity
-        clusters: list[list[float]] = []
+        clusters: List[List[float]] = []
         for _, v, _ in values:
             added = False
             for cluster in clusters:
@@ -217,7 +217,7 @@ class ConsensusEngine:
 
     def _compute_reward(
         self,
-        results: dict[str, ValidatorResult],
+        results: Dict[str, ValidatorResult],
         expected: float,
         consensus_level: ConsensusLevel,
     ) -> float:
@@ -258,7 +258,7 @@ class ConsensusEngine:
         return max(-1.0, min(1.0, reward))
 
     def _compute_confidence(
-        self, results: dict[str, ValidatorResult], consensus_value: float | None
+        self, results: Dict[str, ValidatorResult], consensus_value: Optional[float]
     ) -> float:
         """Compute confidence in the validation result (0.0 to 1.0)."""
         if consensus_value is None:
@@ -299,11 +299,11 @@ class ConsensusEngine:
 
     def _detect_potential_bugs(
         self,
-        results: dict[str, ValidatorResult],
+        results: Dict[str, ValidatorResult],
         expected: float,
-        claude_confidence: float | None,
+        claude_confidence: Optional[float],
         test_case: TestCase,
-    ) -> list[dict[str, Any]]:
+    ) -> List[Dict[str, Any]]:
         """Detect potential bugs in upstream systems.
 
         Returns list of potential bugs when:
@@ -339,9 +339,9 @@ class ConsensusEngine:
 
     def batch_validate(
         self,
-        test_cases: list[TestCase],
+        test_cases: List[TestCase],
         variable: str,
         year: int = 2024,
-    ) -> list[ValidationResult]:
+    ) -> List[ValidationResult]:
         """Validate multiple test cases."""
         return [self.validate(tc, variable, year) for tc in test_cases]

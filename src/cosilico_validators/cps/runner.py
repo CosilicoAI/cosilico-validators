@@ -224,14 +224,54 @@ class CPSValidationRunner:
         return sim.calculate(variable.pe_variable, self.year)
 
     def _run_taxsim(self, variable: VariableConfig) -> Optional[np.ndarray]:
-        """Run TAXSIM for a variable (if applicable)."""
+        """Run TAXSIM for a variable."""
         if variable.taxsim_variable is None:
             return None
 
-        # TODO: Implement TAXSIM comparison
-        # This requires converting CPS data to TAXSIM format and calling the API
-        # For now, return None
-        return None
+        # Cache TAXSIM results across variables
+        if not hasattr(self, "_taxsim_results"):
+            self._taxsim_results = self._run_taxsim_batch()
+
+        if self._taxsim_results is None:
+            return None
+
+        # Extract the variable column
+        if variable.taxsim_variable in self._taxsim_results.columns:
+            return self._taxsim_results[variable.taxsim_variable].values
+        else:
+            print(f"    Variable {variable.taxsim_variable} not in TAXSIM output")
+            return None
+
+    def _run_taxsim_batch(self) -> Optional[pd.DataFrame]:
+        """Run TAXSIM on CPS data using ported batch runner."""
+        try:
+            from .taxsim_batch import TaxsimBatchRunner, load_cps_taxsim_format
+        except ImportError as e:
+            print(f"    TAXSIM batch module not available: {e}")
+            return None
+
+        try:
+            # Load CPS in TAXSIM format
+            print(f"    Loading CPS for TAXSIM...")
+            cps_df = load_cps_taxsim_format()
+
+            # Adjust year (TAXSIM-35 only supports up to 2023)
+            if "year" in cps_df.columns:
+                taxsim_year = min(self.year, 2023)
+                cps_df["year"] = taxsim_year
+
+            # Run TAXSIM
+            runner = TaxsimBatchRunner()
+            results = runner.run(cps_df, show_progress=True)
+
+            return results
+
+        except FileNotFoundError as e:
+            print(f"    {e}")
+            return None
+        except Exception as e:
+            print(f"    TAXSIM batch run failed: {e}")
+            return None
 
     def _compare(
         self,

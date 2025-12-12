@@ -1,6 +1,6 @@
 """PolicyEngine validator - uses policyengine-us package."""
 
-from typing import Any
+from typing import Any, Dict
 
 from cosilico_validators.validators.base import (
     BaseValidator,
@@ -55,13 +55,13 @@ class PolicyEngineValidator(BaseValidator):
     def supports_variable(self, variable: str) -> bool:
         return variable.lower() in SUPPORTED_VARIABLES
 
-    def _build_situation(self, test_case: TestCase, year: int) -> dict[str, Any]:
+    def _build_situation(self, test_case: TestCase, year: int) -> Dict[str, Any]:
         """Convert test case inputs to PolicyEngine situation format."""
         inputs = test_case.inputs
         year_str = str(year)
 
         # Basic household structure
-        situation: dict[str, Any] = {
+        situation: Dict[str, Any] = {
             "people": {"adult": {"age": {year_str: 30}}},
             "tax_units": {"tax_unit": {"members": ["adult"]}},
             "spm_units": {"spm_unit": {"members": ["adult"]}},

@@ -9,7 +9,7 @@ import platform
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional, Union
 
 from cosilico_validators.validators.base import (
     BaseValidator,
@@ -84,7 +84,7 @@ class TaxsimValidator(BaseValidator):
     validator_type = ValidatorType.REFERENCE
     supported_variables = set(TAXSIM_OUTPUT_VARS.keys())
 
-    def __init__(self, taxsim_path: str | Path | None = None):
+    def __init__(self, taxsim_path: Optional[Union[str, Path]] = None):
         """Initialize TAXSIM validator.
 
         Args:
@@ -93,7 +93,7 @@ class TaxsimValidator(BaseValidator):
         """
         self.taxsim_path = self._resolve_taxsim_path(taxsim_path)
 
-    def _resolve_taxsim_path(self, provided_path: str | Path | None) -> Path:
+    def _resolve_taxsim_path(self, provided_path: Optional[Union[str, Path]]) -> Path:
         """Find the TAXSIM executable."""
         if provided_path:
             path = Path(provided_path)
@@ -132,7 +132,7 @@ class TaxsimValidator(BaseValidator):
     def supports_variable(self, variable: str) -> bool:
         return variable.lower() in TAXSIM_OUTPUT_VARS
 
-    def _build_taxsim_input(self, test_case: TestCase, year: int) -> dict[str, Any]:
+    def _build_taxsim_input(self, test_case: TestCase, year: int) -> Dict[str, Any]:
         """Convert test case to TAXSIM input format."""
         inputs = test_case.inputs
 
@@ -259,7 +259,7 @@ class TaxsimValidator(BaseValidator):
             if os.path.exists(output_file):
                 os.unlink(output_file)
 
-    def _parse_output(self, output: str, variable: str) -> float | None:
+    def _parse_output(self, output: str, variable: str) -> Optional[float]:
         """Parse TAXSIM output CSV."""
         lines = output.strip().split("\n")
         if len(lines) < 2:
