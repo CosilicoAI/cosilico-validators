@@ -3,10 +3,10 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, Optional
 import subprocess
 
-from .runner import ValidationResult, VariableConfig, CPSValidationRunner
+from .runner import ValidationResult, ComparisonResult, CPSValidationRunner
 
 
 def get_git_commit() -> str:
@@ -32,56 +32,87 @@ def get_policyengine_version() -> str:
         return "not installed"
 
 
+def get_cosilico_version() -> str:
+    """Get Cosilico engine version."""
+    try:
+        # Try to get git commit from cosilico-engine
+        engine_path = Path.home() / "CosilicoAI/cosilico-engine"
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=engine_path,
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "dev"
+
+
+def comparison_to_breakdown(comp: ComparisonResult) -> Dict[str, Any]:
+    """Convert ComparisonResult to validator breakdown format."""
+    return {
+        "matches": comp.n_matches,
+        "total": comp.n_compared,
+        "rate": comp.match_rate,
+    }
+
+
 def result_to_section(result: ValidationResult) -> Dict[str, Any]:
     """Convert ValidationResult to dashboard section format."""
     section = {
         "section": result.variable.section,
         "title": result.variable.title,
         "variable": result.variable.name,
-        "households": result.households,
+        "households": result.n_tax_units,  # Actually tax units
         "testCases": [],
         "summary": {
-            "total": result.households,
-            "matches": result.pe_results.get("policyengine", 0),
-            "matchRate": result.pe_results.get("policyengine", 0) / result.households
-            if result.households > 0
-            else 0,
-            "meanAbsoluteError": result.mean_absolute_error,
+            "total": result.n_tax_units,
+            "matches": 0,
+            "matchRate": 0,
+            "meanAbsoluteError": 0,
         },
     }
 
     # Add validator breakdown
     validator_breakdown = {}
-    if "policyengine" in result.pe_results:
-        pe_matches = result.pe_results["policyengine"]
-        validator_breakdown["policyengine"] = {
-            "matches": pe_matches,
-            "total": result.households,
-            "rate": pe_matches / result.households if result.households > 0 else 0,
-        }
 
-    if result.taxsim_results and "taxsim" in result.taxsim_results:
-        ts_matches = result.taxsim_results["taxsim"]
-        validator_breakdown["taxsim"] = {
-            "matches": ts_matches,
-            "total": result.households,
-            "rate": ts_matches / result.households if result.households > 0 else 0,
-        }
+    if result.pe_comparison:
+        validator_breakdown["policyengine"] = comparison_to_breakdown(result.pe_comparison)
+        section["summary"]["matches"] = result.pe_comparison.n_matches
+        section["summary"]["matchRate"] = result.pe_comparison.match_rate
+        section["summary"]["meanAbsoluteError"] = result.pe_comparison.mean_absolute_error
+
+    if result.taxsim_comparison:
+        validator_breakdown["taxsim"] = comparison_to_breakdown(result.taxsim_comparison)
 
     if validator_breakdown:
         section["validatorBreakdown"] = validator_breakdown
 
-    # Add mismatches
-    if result.mismatches:
-        # Group mismatches by pattern (simplified - real impl would analyze patterns)
-        section["mismatches"] = [
-            {
-                "description": "Value differences exceeding tolerance",
-                "count": len(result.mismatches),
-                "explanation": f"Cases where PE and TAXSIM differ by more than ${result.variable.tolerance:.0f}",
+    # Add mismatches analysis
+    mismatches = []
+    if result.pe_comparison and result.pe_comparison.mismatches:
+        n_mismatches = result.pe_comparison.n_compared - result.pe_comparison.n_matches
+        if n_mismatches > 0:
+            mismatches.append({
+                "description": f"Cosilico differs from PolicyEngine",
+                "count": n_mismatches,
+                "explanation": f"Cases where Cosilico and PE differ by more than ${result.variable.tolerance:.0f}",
                 "citation": f"See {result.variable.section}",
-            }
-        ]
+            })
+
+    if result.taxsim_comparison and result.taxsim_comparison.mismatches:
+        n_mismatches = result.taxsim_comparison.n_compared - result.taxsim_comparison.n_matches
+        if n_mismatches > 0:
+            mismatches.append({
+                "description": f"Cosilico differs from TAXSIM",
+                "count": n_mismatches,
+                "explanation": f"Cases where Cosilico and TAXSIM differ by more than ${result.variable.tolerance:.0f}",
+                "citation": f"See {result.variable.section}",
+            })
+
+    if mismatches:
+        section["mismatches"] = mismatches
 
     return section
 
@@ -89,7 +120,7 @@ def result_to_section(result: ValidationResult) -> Dict[str, Any]:
 def export_dashboard_json(
     results: Dict[str, ValidationResult],
     output_path: Path,
-    data_source: str = "CPS ASEC",
+    data_source: str = "Enhanced CPS",
     year: int = 2024,
 ) -> None:
     """
@@ -102,52 +133,62 @@ def export_dashboard_json(
         year: Tax year
     """
     # Calculate overall statistics
-    total_households = max(r.households for r in results.values()) if results else 0
-    total_tests = sum(r.households for r in results.values())
-    total_matches = sum(r.pe_results.get("policyengine", 0) for r in results.values())
+    total_tax_units = max(r.n_tax_units for r in results.values()) if results else 0
+
+    # Count matches across all comparisons
+    total_comparisons = 0
+    total_matches = 0
+    total_mae = 0
+    mae_count = 0
+
+    for r in results.values():
+        if r.pe_comparison:
+            total_comparisons += r.pe_comparison.n_compared
+            total_matches += r.pe_comparison.n_matches
+            total_mae += r.pe_comparison.mean_absolute_error
+            mae_count += 1
 
     # Build sections
     sections = [result_to_section(r) for r in results.values()]
 
     # Determine validator availability
-    has_taxsim = any(r.taxsim_results for r in results.values())
-    taxsim_households = sum(
-        r.households for r in results.values() if r.taxsim_results
-    )
+    has_taxsim = any(r.taxsim_comparison for r in results.values())
+    has_pe = any(r.pe_comparison for r in results.values())
 
     validators = [
         {
-            "name": "policyengine",
+            "name": "cosilico",
             "available": True,
+            "version": get_cosilico_version(),
+            "householdsCovered": total_tax_units,
+        },
+        {
+            "name": "policyengine",
+            "available": has_pe,
             "version": get_policyengine_version(),
-            "householdsCovered": total_households,
+            "householdsCovered": total_tax_units if has_pe else 0,
         },
         {
             "name": "taxsim",
             "available": has_taxsim,
             "version": "35",
-            "householdsCovered": taxsim_households if has_taxsim else 0,
+            "householdsCovered": total_tax_units if has_taxsim else 0,
         },
-        {"name": "taxact", "available": False},
     ]
-
-    # Calculate mean MAE across all variables
-    maes = [r.mean_absolute_error for r in results.values() if r.mean_absolute_error > 0]
-    overall_mae = sum(maes) / len(maes) if maes else 0
 
     report = {
         "isSampleData": False,
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "commit": get_git_commit(),
         "dataSource": f"{data_source} {year}",
-        "householdsTotal": total_households,
+        "householdsTotal": total_tax_units,
         "sections": sections,
         "overall": {
-            "totalHouseholds": total_households,
-            "totalTests": total_tests,
+            "totalHouseholds": total_tax_units,
+            "totalTests": total_comparisons,
             "totalMatches": total_matches,
-            "matchRate": total_matches / total_tests if total_tests > 0 else 0,
-            "meanAbsoluteError": overall_mae,
+            "matchRate": total_matches / total_comparisons if total_comparisons > 0 else 0,
+            "meanAbsoluteError": total_mae / mae_count if mae_count > 0 else 0,
         },
         "validators": validators,
     }
@@ -190,7 +231,9 @@ def run_and_export(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run CPS validation and export to JSON")
+    parser = argparse.ArgumentParser(
+        description="Run CPS validation comparing Cosilico against PE and TAXSIM"
+    )
     parser.add_argument(
         "-o", "--output",
         type=Path,
