@@ -11,14 +11,28 @@ from cosilico_validators.validators.base import (
 
 # Variable mapping from common names to PolicyEngine variable names
 VARIABLE_MAPPING = {
+    # Income measures
+    "adjusted_gross_income": "adjusted_gross_income",
+    "agi": "adjusted_gross_income",
+    "earned_income": "earned_income",
+    "gross_income": "irs_gross_income",
+    "employment_income": "employment_income",
+    "self_employment_income": "self_employment_income",
+    "interest_income": "interest_income",
+    "dividend_income": "dividend_income",
+    "capital_gains": "capital_gains",
     # Tax credits
     "eitc": "eitc",
     "earned_income_credit": "eitc",
     "ctc": "ctc",
     "child_tax_credit": "ctc",
+    "refundable_ctc": "refundable_ctc",
+    "cdctc": "cdctc",
+    "child_and_dependent_care_credit": "cdctc",
     # Income tax
     "income_tax": "income_tax",
     "federal_income_tax": "income_tax",
+    "income_tax_before_credits": "income_tax_before_credits",
     "state_income_tax": "state_income_tax",
     # AMT
     "amt": "alternative_minimum_tax",
@@ -27,11 +41,15 @@ VARIABLE_MAPPING = {
     "salt_deduction": "salt_deduction",
     "salt": "salt_deduction",
     "standard_deduction": "standard_deduction",
+    "itemized_deductions": "itemized_deductions_less_salt",
     # Benefits
     "snap": "snap",
     "snap_benefits": "snap",
     "medicaid": "medicaid",
     "tanf": "tanf",
+    "ssi": "ssi",
+    # Filing
+    "filing_status": "filing_status",
 }
 
 # Supported variables
