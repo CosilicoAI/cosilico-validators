@@ -8,6 +8,13 @@ from typing import Any, Dict, List, Optional
 import sys
 import time
 
+from ..variable_mapping import (
+    VARIABLE_MAPPINGS,
+    VariableMapping,
+    get_all_required_inputs,
+    discover_cosilico_files,
+)
+
 
 @dataclass
 class VariableConfig:
@@ -21,6 +28,24 @@ class VariableConfig:
     pe_variable: str  # PolicyEngine variable name
     taxsim_variable: Optional[str] = None  # TAXSIM output column
     tolerance: float = 15.0  # Dollar tolerance for matching
+
+    @classmethod
+    def from_mapping(cls, name: str, mapping: VariableMapping) -> "VariableConfig":
+        """Create VariableConfig from a VariableMapping."""
+        # Extract section from statute (e.g., "26 USC § 1411" -> "26/1411")
+        section = mapping.statute.replace("26 USC § ", "26/").replace("7 USC § ", "7/")
+        section = section.split("(")[0]  # Remove subsection refs
+
+        return cls(
+            name=name,
+            section=section,
+            title=mapping.title,
+            cosilico_file=mapping.cosilico_file,
+            cosilico_variable=mapping.cosilico_variable,
+            pe_variable=mapping.pe_variable or "",
+            taxsim_variable=mapping.taxsim_variable,
+            tolerance=mapping.tolerance,
+        )
 
 
 @dataclass
@@ -67,29 +92,19 @@ class CPSValidationRunner:
 
     Uses PolicyEngine's enhanced CPS via Microsimulation for data,
     then compares Cosilico's vectorized calculations against PE and TAXSIM.
+
+    Variables to validate are defined in variable_mapping.py - the single source
+    of truth for mapping Cosilico variables to PE/TAXSIM equivalents.
     """
 
-    # Variable configurations - maps Cosilico files to PE/TAXSIM variables
-    VARIABLES = [
-        VariableConfig(
-            name="eitc",
-            section="26/32",
-            title="Earned Income Tax Credit",
-            cosilico_file="statute/26/32/a/1/earned_income_credit.cosilico",
-            cosilico_variable="earned_income_credit",
-            pe_variable="eitc",
-            taxsim_variable="v25",
-        ),
-        VariableConfig(
-            name="snap",
-            section="7/2017",
-            title="SNAP Allotment",
-            cosilico_file="statute/7/2017/a/allotment.cosilico",
-            cosilico_variable="snap_allotment",
-            pe_variable="snap",
-            taxsim_variable=None,  # TAXSIM doesn't cover SNAP
-        ),
-    ]
+    @classmethod
+    def get_variables(cls) -> List[VariableConfig]:
+        """Get variable configurations from the central mapping."""
+        return [
+            VariableConfig.from_mapping(name, mapping)
+            for name, mapping in VARIABLE_MAPPINGS.items()
+            if mapping.pe_variable  # Only include variables with PE mappings
+        ]
 
     def __init__(
         self,
@@ -169,17 +184,26 @@ class CPSValidationRunner:
             "is_tax_unit_spouse": sim.calculate("is_tax_unit_spouse", self.year),
             "is_tax_unit_dependent": sim.calculate("is_tax_unit_dependent", self.year),
 
-            # Income
+            # Income - employment
             "earned_income": sim.calculate("earned_income", self.year),
             "wages": sim.calculate("employment_income", self.year),
+            "employment_income": sim.calculate("employment_income", self.year),
+            "self_employment_income": sim.calculate("self_employment_income", self.year),
             "adjusted_gross_income": sim.calculate("adjusted_gross_income", self.year),
+
+            # Income - investment (for NIIT)
+            "interest_income": sim.calculate("interest_income", self.year),
+            "dividend_income": sim.calculate("dividend_income", self.year),
+            "long_term_capital_gains": sim.calculate("long_term_capital_gains", self.year),
+            "short_term_capital_gains": sim.calculate("short_term_capital_gains", self.year),
+            "rental_income": sim.calculate("rental_income", self.year),
 
             # Filing
             "filing_status": sim.calculate("filing_status", self.year),
 
-            # Children
+            # Children (tax unit level)
             "is_child": sim.calculate("is_child", self.year),
-            "is_ctc_qualifying_child": sim.calculate("is_ctc_qualifying_child", self.year),
+            "ctc_qualifying_children": sim.calculate("ctc_qualifying_children", self.year),
         }
 
         # Entity mappings for aggregation
@@ -393,8 +417,8 @@ class CPSValidationRunner:
         n_households = len(np.unique(sim.calculate("household_id", self.year)))
         print(f"\nDataset: {n_households:,} households, {n_tax_units:,} tax units")
 
-        # Run each variable
-        for variable in self.VARIABLES:
+        # Run each variable from central mapping
+        for variable in self.get_variables():
             self.results[variable.name] = self.run_variable(variable)
 
         # Summary
