@@ -26,11 +26,12 @@ from .base import (
 VARIABLE_MAPPING: Dict[str, Dict[str, str]] = {
     # Tax credits
     "eitc": {
-        "file": "statute/26/32/a/1/earned_income_credit.cosilico",
+        # Use validation-focused encoding that takes PE's precomputed eligibility
+        "file": "statute/26/32/eitc_validation.cosilico",
         "variable": "earned_income_credit",
     },
     "ctc": {
-        "file": "statute/26/24/child_tax_credit.cosilico",
+        "file": "statute/26/24/a/credit.cosilico",
         "variable": "child_tax_credit",
     },
 
@@ -46,7 +47,7 @@ VARIABLE_MAPPING: Dict[str, Dict[str, str]] = {
 
     # Deductions
     "standard_deduction": {
-        "file": "statute/26/63/standard_deduction.cosilico",
+        "file": "statute/26/63/c/standard_deduction.cosilico",
         "variable": "standard_deduction",
     },
 
@@ -178,6 +179,7 @@ class CosilicoCalculator(Calculator):
             # Employment income - both raw and IRS-specific
             "employment_income", "self_employment_income", "earned_income",
             "wages", "irs_employment_income", "taxable_self_employment_income",
+            "taxable_earnings_for_social_security",  # W-2 wages subject to SS tax
 
             # Investment income - both raw and tax-specific
             "interest_income", "dividend_income", "taxable_interest_income",
@@ -191,12 +193,29 @@ class CosilicoCalculator(Calculator):
 
             # Children
             "ctc_qualifying_children",
+
+            # EITC-specific (from PE)
+            "eitc_child_count", "eitc_eligible", "eitc_phase_in_rate", "eitc_maximum",
+            # Tax unit level earned income for EITC
+            "tax_unit_earned_income",
         ]
+
+        # Aliases: PE variable name -> encoding variable name
+        # This maps PolicyEngine's computed values to what the encodings expect
+        input_aliases = {
+            "eitc_child_count": "num_qualifying_children",
+            "eitc_eligible": "is_eligible_individual",
+            "tax_unit_earned_income": "earned_income",  # Use TaxUnit level for EITC
+        }
 
         inputs = {}
         for name in input_names:
             try:
-                inputs[name] = np.asarray(source.get_variable(name))
+                value = np.asarray(source.get_variable(name))
+                inputs[name] = value
+                # Also add under alias if defined
+                if name in input_aliases:
+                    inputs[input_aliases[name]] = value
             except (KeyError, Exception):
                 pass  # Variable not available
 
