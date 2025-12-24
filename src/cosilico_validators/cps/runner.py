@@ -72,28 +72,10 @@ class CPSValidationRunner:
     # Variable configurations - maps Cosilico files to PE/TAXSIM variables
     VARIABLES = [
         VariableConfig(
-            name="ctc",
-            section="26/24",
-            title="Child Tax Credit",
-            cosilico_file="26/24/a/credit.cosilico",
-            cosilico_variable="child_tax_credit",
-            pe_variable="ctc",
-            taxsim_variable="v22",
-        ),
-        VariableConfig(
-            name="standard_deduction",
-            section="26/63",
-            title="Standard Deduction",
-            cosilico_file="26/63/c/standard_deduction.cosilico",
-            cosilico_variable="standard_deduction",
-            pe_variable="standard_deduction",
-            taxsim_variable=None,
-        ),
-        VariableConfig(
             name="eitc",
             section="26/32",
             title="Earned Income Tax Credit",
-            cosilico_file="26/32/a/credit.cosilico",  # May need to create
+            cosilico_file="statute/26/32/a/1/earned_income_credit.cosilico",
             cosilico_variable="earned_income_credit",
             pe_variable="eitc",
             taxsim_variable="v25",
@@ -102,7 +84,7 @@ class CPSValidationRunner:
             name="snap",
             section="7/2017",
             title="SNAP Allotment",
-            cosilico_file="7/2017/a/allotment.cosilico",
+            cosilico_file="statute/7/2017/a/allotment.cosilico",
             cosilico_variable="snap_allotment",
             pe_variable="snap",
             taxsim_variable=None,  # TAXSIM doesn't cover SNAP
@@ -143,8 +125,8 @@ class CPSValidationRunner:
                     "policyengine-us required. Install with: pip install policyengine-us"
                 )
 
-            print(f"Loading {self.dataset} dataset...")
-            self._sim = Microsimulation(dataset=self.dataset)
+            print(f"Loading default dataset...")
+            self._sim = Microsimulation()
             n_people = self._sim.calculate("person_id", self.year).size
             print(f"Loaded {n_people:,} people")
 

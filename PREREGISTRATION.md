@@ -340,6 +340,117 @@ The full system has three dimensions:
 | Texas | (no income tax) | TX SNAP rules |
 | ... | State tax agencies | State HHS |
 
+### Historical Dimension
+
+Tax rules change over time. The system must handle:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         TIME DIMENSION                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  PRE-TCJA (≤2017)          TCJA ERA (2018-2025)      POST-TCJA     │
+│  ├── Personal exemptions   ├── No personal exemp     ├── Return?   │
+│  ├── Unlimited SALT        ├── $10K SALT cap         ├── Sunset    │
+│  ├── $1000 CTC             ├── $2000 CTC             ├── $1000?    │
+│  ├── Pease limitation      ├── Suspended             ├── Returns   │
+│  └── Lower std deduction   └── Near-doubled std ded  └── Reverts   │
+│                                                                     │
+│  PARAMETER CHANGES (annual)                                         │
+│  ├── Inflation adjustments (brackets, thresholds, credits)         │
+│  ├── Different CPI measures (CPI-U vs C-CPI-U)                     │
+│  └── Rounding rules vary by provision                              │
+│                                                                     │
+│  STRUCTURAL CHANGES (major legislation)                            │
+│  ├── TCJA 2017 - largest change since 1986                        │
+│  ├── ARP 2021 - temporary EITC/CTC expansion                       │
+│  ├── IRA 2022 - energy credits overhaul                           │
+│  └── Future: TCJA sunset 2026, potential reforms                   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Historical Breakpoints:**
+
+| Year | Event | Variables Affected |
+|------|-------|-------------------|
+| 2018 | TCJA effective | ~80% of tax code |
+| 2021 | ARP (temporary) | EITC, CTC, CDCTC |
+| 2022 | IRA | Energy credits |
+| 2026 | TCJA sunset | Individual provisions revert |
+
+**Encoding Strategy for Time:**
+
+```yaml
+# Parameters are date-keyed, not year-keyed
+parameters:
+  ctc_amount:
+    2017-01-01: 1000   # Pre-TCJA
+    2018-01-01: 2000   # TCJA
+    2026-01-01: 1000   # Sunset (current law)
+
+  salt_cap:
+    2017-01-01: null   # No cap
+    2018-01-01: 10000  # TCJA cap
+    2026-01-01: null   # Sunset
+```
+
+**Structural changes require formula versioning:**
+
+```python
+# Formula changes, not just parameters
+if tax_year <= 2017:
+    deduction = max(standard_deduction, itemized - pease_limitation)
+    taxable_income = agi - deduction - personal_exemptions
+else:  # TCJA
+    deduction = max(standard_deduction, itemized)  # No Pease
+    taxable_income = agi - deduction  # No personal exemptions
+```
+
+**Validation Coverage by Year:**
+
+| Era | Years | Priority | Validators |
+|-----|-------|----------|------------|
+| Current TCJA | 2024-2025 | P1 | PE, TAXSIM |
+| Recent TCJA | 2018-2023 | P2 | PE, TAXSIM |
+| Pre-TCJA | 2013-2017 | P3 | TAXSIM only |
+| Post-sunset | 2026+ | P2 | PE (projections) |
+
+**Scale with Time:**
+
+| Dimension | Count |
+|-----------|-------|
+| Federal × Years (2013-2026) | 14 |
+| States × Years | 51 × 14 = 714 |
+| Variables × Jurisdictions × Years | ~28,000 |
+
+**Research Questions:**
+1. Can RL transfer learning across time? (2024 → 2018 adaptation)
+2. How many provisions require formula changes vs just parameter updates?
+3. Can we detect TCJA sunset issues automatically?
+
+### Bi-Temporal Model (Vintage × Policy Date)
+
+See `cosilico-engine/docs/DESIGN.md` Section 12 for full architecture.
+
+**Key concept:** Two distinct time dimensions:
+- **Vintage**: When was the law enacted? (law-as-of date)
+- **Policy date**: Which tax year's rules to apply?
+
+**Example:**
+| Vintage (law-as-of) | Policy Year | 2026 CTC | Why |
+|---------------------|-------------|----------|-----|
+| 2025-01-15 | 2026 | $1,000 | TCJA sunset (pre-OBBBA) |
+| 2025-08-01 | 2026 | $2,000 | OBBBA passed July 2025 |
+| 2025-01-15 | 2024 | $2,000 | TCJA still in effect |
+
+**Validation implications:**
+- Cosilico and PE must use **same vintage** (same understanding of future law)
+- When new law passes (OBBBA), create new vintage, don't modify old
+- For RL validation: always specify `(vintage, policy_year)` pair
+
+---
+
 ### State Encoding Strategy
 
 For state income taxes, leverage federal foundation:
