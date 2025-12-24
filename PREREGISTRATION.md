@@ -1,18 +1,271 @@
-# Pre-Registration: RL-Guided Tax Code Encoding
+# Pre-Registration: Validation-Driven Tax Code Encoding
 
 ## Study Overview
 
-**Objective:** Demonstrate that reinforcement learning with consensus validation can systematically encode the US federal income tax code into executable DSL, achieving parity with PolicyEngine.
+**Objective:** Develop a continuously-improving AI system for encoding US tax and benefit law into executable DSL, validated against PolicyEngine and TAXSIM.
 
-**Hypothesis:** Each tax variable can achieve FULL_AGREEMENT with PolicyEngine within 1-5 prompt revision rounds, with complexity correlating to revision count.
+**Key Innovation:** Rather than per-variable debugging, we optimize the **encoding plugin** (instructions, subagents, prompts) and use **forecasted improvement decisions** to guide changes. Failures trigger multi-layer diagnosis to identify whether the issue is in the plugin, DSL, parameters, tests, or validators.
 
-**Reward Function:** ConsensusEngine validation against PolicyEngine-US (primary) and TAXSIM-35 (secondary).
+**Framework:** Claude Code plugin with subagent architecture, validated via consensus engine, with improvements tracked through [farness](https://github.com/MaxGhenis/farness) for forecast calibration.
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         ENCODING SYSTEM ARCHITECTURE                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │                      CLAUDE CODE PLUGIN                                 │ │
+│  │                                                                         │ │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │ │
+│  │  │   Statute    │  │   Formula    │  │  Test Case   │                  │ │
+│  │  │   Parser     │──▶│  Generator   │──▶│  Generator   │                  │ │
+│  │  │  Subagent    │  │  Subagent    │  │  Subagent    │                  │ │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘                  │ │
+│  │                                                                         │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                           │                                                  │
+│                           ▼                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │                    CONSENSUS VALIDATION ENGINE                          │ │
+│  │         PolicyEngine-US (primary) + TAXSIM-35 (secondary)              │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                           │                                                  │
+│            ┌──────────────┴──────────────┐                                  │
+│            ▼                             ▼                                  │
+│     ┌─────────────┐              ┌─────────────┐                           │
+│     │   Success   │              │   Failure   │                           │
+│     └──────┬──────┘              └──────┬──────┘                           │
+│            │                            │                                   │
+│            ▼                            ▼                                   │
+│  ┌──────────────────┐        ┌──────────────────────┐                      │
+│  │ Suggest improve- │        │   MULTI-LAYER        │                      │
+│  │ ments? (optional)│        │   DIAGNOSIS          │                      │
+│  └────────┬─────────┘        │                      │                      │
+│           │                  │  Which layer failed? │                      │
+│           │                  │  • Plugin?           │                      │
+│           │                  │  • DSL/Core?         │                      │
+│           │                  │  • Parameters?       │                      │
+│           │                  │  • Test cases?       │                      │
+│           │                  │  • Validators?       │                      │
+│           │                  │  • Variable schema?  │                      │
+│           │                  └──────────┬───────────┘                      │
+│           │                             │                                   │
+│           └──────────────┬──────────────┘                                   │
+│                          ▼                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │                    FARNESS IMPROVEMENT DECISION                         │ │
+│  │                                                                         │ │
+│  │  Claude suggests improvements with FORECASTS:                          │ │
+│  │  • Expected success rate change: +5% [2%, 10%]                         │ │
+│  │  • Expected regressions: 1 [0, 3]                                      │ │
+│  │  • Implementation time: 0.5h [0.25h, 1h]                               │ │
+│  │                                                                         │ │
+│  │  After implementation, actuals are recorded for calibration.           │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Multi-Layer Diagnosis
+
+When encoding fails, the problem could be at multiple layers:
+
+| Layer | Repository | Example Issue | Example Fix |
+|-------|------------|---------------|-------------|
+| **1. Plugin** | cosilico-claude | "Claude misunderstood phase-out" | Improve prompt, add examples |
+| **2. DSL/Core** | cosilico-engine | "Can't express circular dependency" | Add `iterate_until_stable()` primitive |
+| **3. Parameters** | cosilico-data-sources | "Missing 2024 EITC threshold" | Add parameter with citation |
+| **4. Test Cases** | cosilico-validators | "Expected value is wrong" | Correct test, add edge cases |
+| **5. Validators** | cosilico-validators | "PE and TAXSIM disagree" | File upstream bug with citation |
+| **6. Variable Schema** | cosilico-us | "Need investment_income input" | Add to inputs/variables.yaml |
+
+### Diagnosis Flow
+
+```python
+class FailureDiagnosis:
+    def diagnose(self, failure: EncodingAttempt) -> LayerDiagnosis:
+        # Check each layer in order of likelihood
+
+        if self.validators_disagree(failure):
+            return LayerDiagnosis(layer="validator", ...)
+
+        if self.missing_input_variable(failure):
+            return LayerDiagnosis(layer="variable_schema", ...)
+
+        if self.missing_parameter(failure):
+            return LayerDiagnosis(layer="parameters", ...)
+
+        if self.dsl_cant_express(failure):
+            return LayerDiagnosis(layer="dsl_core", ...)
+
+        if self.test_case_suspicious(failure):
+            return LayerDiagnosis(layer="test_case", ...)
+
+        # Default: plugin issue
+        return LayerDiagnosis(layer="plugin", ...)
+```
+
+---
+
+## Adaptive Validation Strategy
+
+### Declining Sample Fraction
+
+As confidence grows, we test fewer variables per plugin update:
+
+```
+Sample Fraction
+100%│ ████
+    │ ████
+ 50%│ ████ ████
+    │ ████ ████ ████
+ 10%│ ████ ████ ████ ████ ████ ████
+    └────────────────────────────────▶
+      0    50   100  200  300  400  variables encoded
+```
+
+| Stage | Variables Encoded | Sample Fraction | Rationale |
+|-------|-------------------|-----------------|-----------|
+| Early | 0-50 | 100% | Building confidence |
+| Middle | 50-200 | 30% | Established patterns |
+| Late | 200-500 | 10% | High confidence |
+| Scale | 500+ | 5% | Focus on new/risky |
+
+### Multi-Version Testing (Explore/Exploit)
+
+Plugin versions are treated as arms in a multi-armed bandit:
+
+```python
+class AdaptiveValidator:
+    def select_plugin(self, strategy: str = "thompson") -> str:
+        """Balance exploration of new plugins vs exploitation of proven ones."""
+        if strategy == "thompson":
+            # Thompson sampling: sample from Beta(successes+1, failures+1)
+            samples = {
+                v: np.random.beta(arm.successes + 1, arm.failures + 1)
+                for v, arm in self.arms.items()
+            }
+            return max(samples, key=samples.get)
+```
+
+| Allocation | Plugin Type | Purpose |
+|------------|-------------|---------|
+| 70% | Stable (best proven) | Exploit: reliable encoding |
+| 25% | Current (latest) | Exploit: incremental improvement |
+| 5% | Experimental | Explore: test new approaches |
+
+---
+
+## Forecasted Improvement Decisions
+
+Using [farness](https://github.com/MaxGhenis/farness), every improvement suggestion requires quantified forecasts:
+
+### KPIs for Plugin Changes
+
+```python
+PLUGIN_KPIS = [
+    KPI(name="success_rate_delta", unit="%", weight=1.0),
+    KPI(name="regression_count", unit="count", weight=0.8),
+    KPI(name="encoding_speed_delta", unit="ms", weight=0.3),
+]
+```
+
+### Suggestion Format
+
+Claude must provide forecasts for every suggested change:
+
+```yaml
+suggestions:
+  - name: "Add filing status reminder to formula_gen"
+    layer: "plugin"
+    subagent: "formula_gen"
+    change: "Add 'Always check filing status edge cases (MFS, HOH)' to prompt"
+    forecasts:
+      success_rate_delta:
+        point: 5  # +5% success rate
+        ci: [2, 10]  # 80% confidence interval
+        reasoning: "Filing status errors caused 3 of last 10 failures"
+      regression_count:
+        point: 1
+        ci: [0, 3]
+        reasoning: "Minor prompt addition, low regression risk"
+    base_rate: "Similar prompt additions improved success by 3-7% historically"
+```
+
+### Calibration Tracking
+
+After implementation, actuals are recorded:
+
+```python
+decision.actual_outcomes = {
+    "success_rate_delta": actual_improvement,
+    "regression_count": regressions_detected,
+}
+decision.scored_at = datetime.now()
+
+# Track calibration over time
+tracker = CalibrationTracker(all_decisions)
+print(tracker.summary())
+# "Overconfident: only 65% of actuals in 80% CIs"
+```
+
+Claude sees its calibration history and adjusts forecasts accordingly.
+
+---
+
+## Tool-Based History Access
+
+History is **queryable, not dumped** into context. Claude decides what's relevant:
+
+```python
+class PluginHistoryTools:
+    """MCP-style tools for exploring history."""
+
+    def get_recent_failures(self, n: int = 10) -> list[FailureSummary]:
+        """Last N encoding failures."""
+
+    def get_similar_failures(self, variable: str) -> list[FailureSummary]:
+        """Failures on similar variable types."""
+
+    def get_suggestion_outcomes(self, suggestion_type: str) -> list[SuggestionOutcome]:
+        """How did similar suggestions perform?"""
+
+    def get_calibration(self, kpi: str = None) -> CalibrationSummary:
+        """Forecast accuracy stats."""
+
+    def get_plugin_diff(self, v1: str, v2: str) -> str:
+        """What changed between plugin versions?"""
+
+    def search_history(self, query: str) -> list[HistoryMatch]:
+        """Semantic search over encoding history."""
+
+    def get_subagent_stats(self, subagent: str) -> SubagentStats:
+        """Performance breakdown by subagent."""
+```
+
+### Storage Structure
+
+```
+results/
+├── encoding_log.jsonl      # All encoding attempts
+├── suggestions.jsonl       # All improvement suggestions
+├── decisions.jsonl         # Farness decisions with forecasts
+├── outcomes.jsonl          # Actual outcomes after implementation
+├── calibration_cache.json  # Pre-computed calibration stats
+└── index/                  # Search index for semantic queries
+```
 
 ---
 
 ## Dependency Graph: Federal Income Tax
 
-The tax code forms a directed acyclic graph. Variables must be encoded in topological order.
+The tax code forms a DAG. Variables must be encoded in topological order.
 
 ```
 LEVEL 0: INPUT VARIABLES (from microdata)
@@ -21,306 +274,158 @@ LEVEL 0: INPUT VARIABLES (from microdata)
 ├── interest_income (§61(a)(4))
 ├── dividend_income (§61(a)(7))
 ├── capital_gains (§1222)
-├── rental_income
-├── age
 ├── filing_status (§1)
-├── is_blind
-└── num_dependents
+├── age, is_blind, num_dependents
 
 LEVEL 1: GROSS INCOME
-├── gross_income (§61) = sum of all income sources
-└── earned_income (§32(c)(2)) = wages + SE income
+├── gross_income (§61)
+└── earned_income (§32(c)(2))
 
 LEVEL 2: ABOVE-THE-LINE DEDUCTIONS (§62)
-├── educator_expenses (§62(a)(2)(D))
-├── self_employment_tax_deduction (§164(f))
-├── self_employed_health_insurance (§162(l))
-├── ira_deduction (§219)
-├── student_loan_interest (§221)
+├── educator_expenses, ira_deduction, student_loan_interest
 └── total_above_line_deductions
 
 LEVEL 3: ADJUSTED GROSS INCOME
 └── adjusted_gross_income (§62) = gross_income - above_line_deductions
 
 LEVEL 4: DEDUCTIONS
-├── standard_deduction (§63(c)) ✅ ENCODED
-│   ├── basic_standard_deduction
-│   ├── additional_aged_blind (§63(f))
-│   └── dependent_limitation (§63(c)(5))
+├── standard_deduction (§63(c))
 ├── itemized_deductions (§63(d))
-│   ├── medical_expenses (§213) - 7.5% AGI floor
-│   ├── salt_deduction (§164) - $10K cap ⚠️ PARTIAL
+│   ├── medical_expenses (§213)
+│   ├── salt_deduction (§164) - $10K cap
 │   ├── mortgage_interest (§163(h))
-│   ├── charitable_contributions (§170)
-│   └── casualty_losses (§165)
+│   └── charitable_contributions (§170)
 └── deduction = max(standard, itemized)
 
 LEVEL 5: TAXABLE INCOME
 └── taxable_income (§63(a)) = AGI - deduction - QBI_deduction
 
 LEVEL 6: TAX BEFORE CREDITS
-├── regular_tax (§1) ✅ BRACKETS ENCODED
-│   └── Uses tax brackets by filing status
+├── regular_tax (§1)
 └── tentative_minimum_tax (§55(b))
-    ├── amt_income = taxable_income + preferences
-    ├── amt_exemption (§55(d)) ✅ ENCODED
-    └── amt_tax = 26%/28% rates
 
-LEVEL 7: CREDITS (reduce tax liability)
-├── NON-REFUNDABLE (limited to tax liability)
-│   ├── child_tax_credit_nonrefundable (§24) ✅ ENCODED
-│   ├── child_dependent_care_credit (§21)
-│   ├── education_credits (§25A)
-│   ├── retirement_savings_credit (§25B)
-│   ├── residential_energy_credit (§25C/D)
-│   └── foreign_tax_credit (§27)
-├── REFUNDABLE (can exceed liability)
-│   ├── earned_income_credit (§32) ✅ ENCODED
-│   ├── additional_child_tax_credit (§24(d)) ✅ ENCODED
-│   └── american_opportunity_credit (§25A(i))
-└── alternative_minimum_tax (§55) = max(0, TMT - regular_tax) ⚠️ PARTIAL
+LEVEL 7: CREDITS
+├── NON-REFUNDABLE: ctc, cdctc, education_credits, ...
+├── REFUNDABLE: eitc, additional_ctc, ...
+└── alternative_minimum_tax (§55)
 
 LEVEL 8: FINAL TAX
-├── income_tax = regular_tax - credits + AMT
-├── self_employment_tax (§1401)
-├── net_investment_income_tax (§1411)
 └── total_federal_tax
 ```
 
 ---
 
-## Encoding Status
+## Metrics and Data Collection
 
-| Variable | Section | Level | Status | PE Variable | Rounds |
-|----------|---------|-------|--------|-------------|--------|
-| wages | §61(a)(1) | 0 | ✅ Input | employment_income | - |
-| filing_status | §1 | 0 | ✅ Input | filing_status | - |
-| age | - | 0 | ✅ Input | age | - |
-| earned_income | §32(c)(2) | 1 | ✅ Encoded | earned_income | ? |
-| gross_income | §61 | 1 | ❌ Missing | adjusted_gross_income | - |
-| above_line_deductions | §62 | 2 | ❌ Missing | above_the_line_deductions | - |
-| adjusted_gross_income | §62 | 3 | ⚠️ Partial | adjusted_gross_income | ? |
-| standard_deduction | §63(c) | 4 | ✅ Encoded | standard_deduction | ? |
-| itemized_deductions | §63(d) | 4 | ❌ Missing | itemized_taxable_income_deductions | - |
-| salt_deduction | §164 | 4 | ⚠️ Partial | salt_deduction | ? |
-| taxable_income | §63(a) | 5 | ❌ Missing | taxable_income | - |
-| regular_tax | §1 | 6 | ⚠️ Partial | income_tax_before_credits | ? |
-| amt_exemption | §55(d) | 6 | ✅ Encoded | amt_exemption | ? |
-| tentative_minimum_tax | §55(b) | 6 | ❌ Missing | tentative_minimum_tax | - |
-| eitc | §32 | 7 | ✅ Encoded | eitc | ? |
-| ctc | §24 | 7 | ✅ Encoded | ctc | ? |
-| alternative_minimum_tax | §55 | 7 | ⚠️ Partial | alternative_minimum_tax | ? |
-| income_tax | §1 | 8 | ❌ Missing | income_tax | - |
+### Per-Encoding Attempt
 
-**Legend:**
-- ✅ Encoded: DSL exists in cosilico-us
-- ⚠️ Partial: Encoded but not validated against PE
-- ❌ Missing: Not yet encoded
-- Rounds: RL iterations to achieve FULL_AGREEMENT (to be filled during study)
+```python
+@dataclass
+class EncodingAttempt:
+    # Identity
+    variable: str
+    section: str  # "26 USC § 32(a)(2)"
+    plugin_version: str
+    timestamp: datetime
 
----
+    # Bandit context
+    selection_strategy: str  # "thompson" | "exploit" | "explore"
+    sample_fraction_used: float
 
-## Validation Protocol
+    # Results
+    passed: bool
+    match_rate: float
+    deviations: list[TestDeviation]
+    generation_time_ms: int
 
-### For Each Variable:
-
-1. **Initial Encoding**
-   - Claude encodes statute section into Cosilico DSL
-   - Create test cases covering all code paths
-   - Record: prompt used, time taken
-
-2. **Validation Round 1**
-   ```python
-   result = validate_encoding(
-       variable=var_name,
-       test_cases=test_cases,
-       year=2024,
-   )
-   ```
-   - Record: match_rate, reward_signal, issues
-
-3. **Iteration (if needed)**
-   - Analyze discrepancies
-   - Determine: encoding error vs upstream bug
-   - Revise prompt/encoding
-   - Re-validate
-   - Record: changes made, new match_rate
-
-4. **Completion Criteria**
-   - FULL_AGREEMENT achieved, OR
-   - POTENTIAL_UPSTREAM_BUG documented with citation
-
-### Test Case Requirements:
-
-Each variable must have test cases covering:
-- [ ] Zero/edge values
-- [ ] Phase-in region (if applicable)
-- [ ] Plateau region (if applicable)
-- [ ] Phase-out region (if applicable)
-- [ ] All filing statuses
-- [ ] Threshold boundaries (±$1)
-- [ ] Historical years (2018-2024)
-
----
-
-## Encoding Order (Topological)
-
-### Phase 1: Foundation (Levels 0-3)
-```
-1. gross_income (§61)
-2. above_line_deductions (§62)
-3. adjusted_gross_income (§62)
+    # Diagnosis (if failed)
+    diagnosed_layer: str  # "plugin" | "dsl_core" | "parameters" | ...
+    diagnosis_confidence: float
 ```
 
-### Phase 2: Deductions (Level 4)
-```
-4. itemized_deductions components:
-   - medical_expense_deduction (§213)
-   - salt_deduction (§164) - VALIDATE existing
-   - mortgage_interest_deduction (§163(h))
-   - charitable_deduction (§170)
-5. standard_deduction (§63(c)) - VALIDATE existing
-6. deduction (§63) - max(standard, itemized)
-```
+### Per-Plugin Version
 
-### Phase 3: Tax Calculation (Levels 5-6)
-```
-7. taxable_income (§63(a))
-8. regular_tax (§1) - VALIDATE existing brackets
-9. tentative_minimum_tax (§55(b))
-```
+```python
+@dataclass
+class PluginVersion:
+    version: str
+    subagent_versions: dict[str, str]
 
-### Phase 4: Credits (Level 7)
-```
-10. eitc (§32) - VALIDATE existing
-11. ctc (§24) - VALIDATE existing
-12. child_dependent_care_credit (§21)
-13. education_credits (§25A)
-14. alternative_minimum_tax (§55) - depends on TMT
+    # Bandit stats
+    attempts: int
+    successes: int
+    failures: int
+    success_rate: float
+
+    # Breakdown
+    failure_by_layer: dict[str, int]
+    failure_by_subagent: dict[str, int]
 ```
 
-### Phase 5: Final (Level 8)
-```
-15. income_tax_before_refundable_credits
-16. income_tax (final)
-17. self_employment_tax (§1401)
-18. total_federal_tax
-```
+### Per-Improvement Decision
 
----
+```python
+@dataclass
+class ImprovementDecision:
+    # Farness decision
+    decision_id: str
+    suggested_change: str
+    target_layer: str
+    target_repo: str
 
-## Metrics to Track
+    # Forecasts
+    forecasted_success_delta: Forecast
+    forecasted_regressions: Forecast
 
-### Per Variable:
-- `encoding_rounds`: Number of prompt revisions
-- `time_to_parity`: Time from start to FULL_AGREEMENT
-- `test_cases_count`: Number of test cases
-- `initial_match_rate`: First validation match rate
-- `final_match_rate`: After all revisions
-- `upstream_bugs_found`: PE/TAXSIM issues discovered
+    # Actuals (after implementation)
+    actual_success_delta: float
+    actual_regressions: int
 
-### Aggregate:
-- Total encoding time
-- Average rounds per variable
-- Correlation: statute complexity vs rounds
-- Upstream bugs filed
-
----
-
-## Data Collection
-
-Results stored in: `cosilico-validators/results/`
-
-```
-results/
-├── encoding_log.jsonl       # All encoding attempts
-├── validation_results.jsonl # All validation runs
-├── upstream_bugs.jsonl      # Discovered PE/TAXSIM bugs
-└── summary_stats.json       # Aggregate metrics
-```
-
-### Log Format:
-```json
-{
-  "timestamp": "2024-12-23T...",
-  "variable": "adjusted_gross_income",
-  "section": "26 USC § 62",
-  "round": 1,
-  "prompt_hash": "abc123",
-  "match_rate": 0.85,
-  "reward_signal": 0.42,
-  "issues": [...],
-  "duration_seconds": 45
-}
+    # Calibration
+    forecast_error: float
+    in_confidence_interval: bool
 ```
 
 ---
 
 ## Success Criteria
 
-**Study succeeds if:**
-1. All Level 0-6 variables achieve FULL_AGREEMENT
-2. Average rounds ≤ 3 per variable
-3. ≥ 90% of Level 7 credits achieve FULL_AGREEMENT
-4. Any discrepancies are documented as upstream bugs with citations
+### Primary Metrics
 
-**Study provides evidence for:**
-- RL with consensus validation can encode complex legal rules
-- Iteration count correlates with statute complexity
-- Process discovers bugs in existing implementations
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| Federal tax coverage | ≥95% of variables pass | Variables with FULL_AGREEMENT / total |
+| Average plugin iterations | ≤3 per variable type | Mean iterations across variable categories |
+| Regression rate | ≤2% per plugin update | Regressions / sampled variables |
+| Forecast calibration | 75-85% coverage | Actuals in 80% CIs |
+
+### Learning Signals
+
+1. **Plugin improvement rate**: Do success rates increase over time?
+2. **Layer diagnosis accuracy**: Does fixing diagnosed layer solve the problem?
+3. **Forecast calibration**: Is Claude learning to predict improvement impact?
+4. **Transfer learning**: Do later variables encode faster than early ones?
 
 ---
 
-## Multi-Jurisdiction Architecture
+## Bi-Temporal Model (Vintage × Policy Date)
 
-The full system has three dimensions:
+See `cosilico-engine/docs/DESIGN.md` Section 12 for full architecture.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        JURISDICTION MATRIX                          │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  FEDERAL TAX (Title 26)          FEDERAL BENEFITS (Title 7, 42)    │
-│  ├── Income (§1-§1400)           ├── SNAP (§2011-2036)             │
-│  ├── Credits (§21-§54)           ├── Medicaid (§1396)              │
-│  └── AMT (§55-§59)               └── SSI (§1381)                   │
-│           │                               │                         │
-│           ▼                               ▼                         │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │                    STATE LAYER (×51)                         │   │
-│  ├─────────────────────────────────────────────────────────────┤   │
-│  │  STATE TAXES                  STATE BENEFIT OPTIONS          │   │
-│  │  ├── CA: piggybacks federal   ├── CA SNAP: BBP, heat/eat    │   │
-│  │  ├── NY: own brackets         ├── NY SNAP: different rules  │   │
-│  │  ├── TX: no income tax        ├── TX SNAP: ...              │   │
-│  │  └── ... (48 more)            └── ... (48 more)              │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
+**Three temporal dimensions:**
+1. **Vintage** (law-as-of) - explicitly modeled in parameters
+2. **Policy date** (tax year) - explicitly modeled in parameters
+3. **Model version** (Cosilico code) - tracked via git commit hash
 
-### Encoding Order by Scope
+| Vintage (law-as-of) | Policy Year | 2026 CTC | Why |
+|---------------------|-------------|----------|-----|
+| 2025-01-15 | 2026 | $1,000 | TCJA sunset (pre-OBBBA) |
+| 2025-08-01 | 2026 | $2,000 | OBBBA passed July 2025 |
+| 2025-01-15 | 2024 | $2,000 | TCJA still in effect |
 
-**Phase A: Federal Foundation (this study)**
-- Federal income tax pipeline (L0-L8)
-- Federal benefit rules (SNAP federal, Medicaid categorical)
-- Validate against PolicyEngine-US
+---
 
-**Phase B: State Income Taxes**
-- Start with high-population states: CA, TX, NY, FL, PA
-- Group by type:
-  - Piggyback states (use federal AGI): ~30 states
-  - Independent states (own calculations): ~10 states
-  - No income tax: 9 states (trivial)
-- Validate against state tax calculators
-
-**Phase C: State Benefit Variations**
-- SNAP state options (50 combinations)
-- Medicaid expansion status
-- State EITC supplements (30 states)
-- State CTC supplements (emerging)
-
-### Scale Estimates
+## Multi-Jurisdiction Scale
 
 | Component | Jurisdictions | Variables | Test Cases |
 |-----------|---------------|-----------|------------|
@@ -330,174 +435,43 @@ The full system has three dimensions:
 | State Benefits | 51 | ~15 each | ~7,500 |
 | **Total** | **51** | **~2,000** | **~18,000** |
 
-### Validation Sources by Jurisdiction
+---
 
-| Jurisdiction | Tax Validator | Benefit Validator |
-|--------------|---------------|-------------------|
-| Federal | PolicyEngine, TAXSIM | PolicyEngine |
-| California | FTB calculator | CalFresh rules |
-| New York | NY DTF calculator | NY SNAP rules |
-| Texas | (no income tax) | TX SNAP rules |
-| ... | State tax agencies | State HHS |
+## Research Questions
 
-### Historical Dimension
-
-Tax rules change over time. The system must handle:
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         TIME DIMENSION                              │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  PRE-TCJA (≤2017)          TCJA ERA (2018-2025)      POST-TCJA     │
-│  ├── Personal exemptions   ├── No personal exemp     ├── Return?   │
-│  ├── Unlimited SALT        ├── $10K SALT cap         ├── Sunset    │
-│  ├── $1000 CTC             ├── $2000 CTC             ├── $1000?    │
-│  ├── Pease limitation      ├── Suspended             ├── Returns   │
-│  └── Lower std deduction   └── Near-doubled std ded  └── Reverts   │
-│                                                                     │
-│  PARAMETER CHANGES (annual)                                         │
-│  ├── Inflation adjustments (brackets, thresholds, credits)         │
-│  ├── Different CPI measures (CPI-U vs C-CPI-U)                     │
-│  └── Rounding rules vary by provision                              │
-│                                                                     │
-│  STRUCTURAL CHANGES (major legislation)                            │
-│  ├── TCJA 2017 - largest change since 1986                        │
-│  ├── ARP 2021 - temporary EITC/CTC expansion                       │
-│  ├── IRA 2022 - energy credits overhaul                           │
-│  └── Future: TCJA sunset 2026, potential reforms                   │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-**Key Historical Breakpoints:**
-
-| Year | Event | Variables Affected |
-|------|-------|-------------------|
-| 2018 | TCJA effective | ~80% of tax code |
-| 2021 | ARP (temporary) | EITC, CTC, CDCTC |
-| 2022 | IRA | Energy credits |
-| 2026 | TCJA sunset | Individual provisions revert |
-
-**Encoding Strategy for Time:**
-
-```yaml
-# Parameters are date-keyed, not year-keyed
-parameters:
-  ctc_amount:
-    2017-01-01: 1000   # Pre-TCJA
-    2018-01-01: 2000   # TCJA
-    2026-01-01: 1000   # Sunset (current law)
-
-  salt_cap:
-    2017-01-01: null   # No cap
-    2018-01-01: 10000  # TCJA cap
-    2026-01-01: null   # Sunset
-```
-
-**Structural changes require formula versioning:**
-
-```python
-# Formula changes, not just parameters
-if tax_year <= 2017:
-    deduction = max(standard_deduction, itemized - pease_limitation)
-    taxable_income = agi - deduction - personal_exemptions
-else:  # TCJA
-    deduction = max(standard_deduction, itemized)  # No Pease
-    taxable_income = agi - deduction  # No personal exemptions
-```
-
-**Validation Coverage by Year:**
-
-| Era | Years | Priority | Validators |
-|-----|-------|----------|------------|
-| Current TCJA | 2024-2025 | P1 | PE, TAXSIM |
-| Recent TCJA | 2018-2023 | P2 | PE, TAXSIM |
-| Pre-TCJA | 2013-2017 | P3 | TAXSIM only |
-| Post-sunset | 2026+ | P2 | PE (projections) |
-
-**Scale with Time:**
-
-| Dimension | Count |
-|-----------|-------|
-| Federal × Years (2013-2026) | 14 |
-| States × Years | 51 × 14 = 714 |
-| Variables × Jurisdictions × Years | ~28,000 |
-
-**Research Questions:**
-1. Can RL transfer learning across time? (2024 → 2018 adaptation)
-2. How many provisions require formula changes vs just parameter updates?
-3. Can we detect TCJA sunset issues automatically?
-
-### Bi-Temporal Model (Vintage × Policy Date)
-
-See `cosilico-engine/docs/DESIGN.md` Section 12 for full architecture.
-
-**Key concept:** Two distinct time dimensions:
-- **Vintage**: When was the law enacted? (law-as-of date)
-- **Policy date**: Which tax year's rules to apply?
-
-**Example:**
-| Vintage (law-as-of) | Policy Year | 2026 CTC | Why |
-|---------------------|-------------|----------|-----|
-| 2025-01-15 | 2026 | $1,000 | TCJA sunset (pre-OBBBA) |
-| 2025-08-01 | 2026 | $2,000 | OBBBA passed July 2025 |
-| 2025-01-15 | 2024 | $2,000 | TCJA still in effect |
-
-**Three temporal dimensions:**
-1. **Vintage** (law-as-of) - explicitly modeled in parameters
-2. **Policy date** (tax year) - explicitly modeled in parameters
-3. **Model version** (Cosilico code) - tracked via git commit hash
-
-**Validation implications:**
-- Cosilico and PE must use **same vintage** (same understanding of future law)
-- When new law passes (OBBBA), create new vintage, don't modify old
-- For RL validation: always specify `(vintage, policy_year)` pair
-- Model version captured implicitly via git (reproducibility)
+1. **Plugin vs other layers**: What fraction of failures are plugin issues vs DSL limitations vs parameter gaps?
+2. **Forecast calibration**: Can Claude learn to accurately predict improvement impact?
+3. **Explore/exploit tradeoff**: What's the optimal exploration rate for plugin versions?
+4. **Transfer learning**: How much does encoding federal tax help with state taxes?
+5. **DSL evolution**: What primitives should be added based on encoding failures?
+6. **Upstream bugs**: How many PE/TAXSIM bugs are discovered through consensus validation?
 
 ---
 
-### State Encoding Strategy
+## Timeline
 
-For state income taxes, leverage federal foundation:
-
-```python
-# Most states piggyback federal AGI
-state_agi = federal_agi + state_additions - state_subtractions
-
-# Then apply state-specific brackets
-state_tax = apply_brackets(state_taxable_income, state_brackets[state])
-
-# State credits (often % of federal)
-state_eitc = federal_eitc * state_eitc_match_rate[state]
-```
-
-**Key insight:** ~60% of state tax code is reusable from federal.
-The RL system can transfer learning from federal to state encodings.
-
----
-
-## Timeline (Revised)
-
-| Phase | Weeks | Scope | Variables |
-|-------|-------|-------|-----------|
-| A1 | 1-2 | Federal Tax Foundation | gross_income → AGI |
-| A2 | 3-4 | Federal Tax Calc | taxable_income → income_tax |
-| A3 | 5-6 | Federal Credits | EITC, CTC, AMT validation |
-| A4 | 7-8 | Federal Benefits | SNAP, Medicaid federal rules |
-| B1 | 9-12 | State Taxes (Top 10) | CA, NY, TX, FL, PA, IL, OH, GA, NC, MI |
-| B2 | 13-16 | State Taxes (Remaining) | 41 remaining states |
-| C1 | 17-20 | State Benefits | SNAP options, state EITC |
-| **Total** | **20 weeks** | **Full US coverage** |
+| Phase | Weeks | Scope | Focus |
+|-------|-------|-------|-------|
+| Infrastructure | 0-2 | Build plugin, validators, farness integration | Architecture |
+| A1 | 3-4 | Federal Tax Foundation | gross_income → AGI |
+| A2 | 5-6 | Federal Tax Calc | taxable_income → income_tax |
+| A3 | 7-8 | Federal Credits | EITC, CTC, AMT |
+| B1 | 9-14 | State Taxes (Top 10) | CA, NY, TX, FL, PA, ... |
+| B2 | 15-20 | State Taxes + Benefits | Remaining states |
 
 ---
 
 ## Pre-Registration Date
 
-**Registered:** 2024-12-23
+**Registered:** 2024-12-23 (updated 2024-12-24)
 
 **Investigators:**
 - Max Ghenis (PolicyEngine)
 - Claude (Anthropic) - encoding agent
 
 **Repository:** https://github.com/CosilicoAI/cosilico-validators
+
+**Related:**
+- [farness](https://github.com/MaxGhenis/farness) - forecast tracking
+- [cosilico-engine](https://github.com/CosilicoAI/cosilico-engine) - DSL/core
+- [cosilico-us](https://github.com/CosilicoAI/cosilico-us) - US statute encodings
