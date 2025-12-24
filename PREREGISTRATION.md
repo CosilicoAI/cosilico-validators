@@ -271,16 +271,107 @@ results/
 
 ---
 
-## Timeline
+## Multi-Jurisdiction Architecture
 
-| Week | Phase | Variables |
-|------|-------|-----------|
-| 1 | Foundation | gross_income, above_line, AGI |
-| 2 | Deductions | itemized components, standard |
-| 3 | Tax Calc | taxable_income, regular_tax, TMT |
-| 4 | Credits | Validate existing, add CDCTC, education |
-| 5 | Final | AMT, income_tax, SE tax |
-| 6 | Analysis | Aggregate results, write paper |
+The full system has three dimensions:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        JURISDICTION MATRIX                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  FEDERAL TAX (Title 26)          FEDERAL BENEFITS (Title 7, 42)    │
+│  ├── Income (§1-§1400)           ├── SNAP (§2011-2036)             │
+│  ├── Credits (§21-§54)           ├── Medicaid (§1396)              │
+│  └── AMT (§55-§59)               └── SSI (§1381)                   │
+│           │                               │                         │
+│           ▼                               ▼                         │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │                    STATE LAYER (×51)                         │   │
+│  ├─────────────────────────────────────────────────────────────┤   │
+│  │  STATE TAXES                  STATE BENEFIT OPTIONS          │   │
+│  │  ├── CA: piggybacks federal   ├── CA SNAP: BBP, heat/eat    │   │
+│  │  ├── NY: own brackets         ├── NY SNAP: different rules  │   │
+│  │  ├── TX: no income tax        ├── TX SNAP: ...              │   │
+│  │  └── ... (48 more)            └── ... (48 more)              │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Encoding Order by Scope
+
+**Phase A: Federal Foundation (this study)**
+- Federal income tax pipeline (L0-L8)
+- Federal benefit rules (SNAP federal, Medicaid categorical)
+- Validate against PolicyEngine-US
+
+**Phase B: State Income Taxes**
+- Start with high-population states: CA, TX, NY, FL, PA
+- Group by type:
+  - Piggyback states (use federal AGI): ~30 states
+  - Independent states (own calculations): ~10 states
+  - No income tax: 9 states (trivial)
+- Validate against state tax calculators
+
+**Phase C: State Benefit Variations**
+- SNAP state options (50 combinations)
+- Medicaid expansion status
+- State EITC supplements (30 states)
+- State CTC supplements (emerging)
+
+### Scale Estimates
+
+| Component | Jurisdictions | Variables | Test Cases |
+|-----------|---------------|-----------|------------|
+| Federal Tax | 1 | ~50 | ~500 |
+| Federal Benefits | 1 | ~30 | ~300 |
+| State Taxes | 51 | ~20 each | ~10,000 |
+| State Benefits | 51 | ~15 each | ~7,500 |
+| **Total** | **51** | **~2,000** | **~18,000** |
+
+### Validation Sources by Jurisdiction
+
+| Jurisdiction | Tax Validator | Benefit Validator |
+|--------------|---------------|-------------------|
+| Federal | PolicyEngine, TAXSIM | PolicyEngine |
+| California | FTB calculator | CalFresh rules |
+| New York | NY DTF calculator | NY SNAP rules |
+| Texas | (no income tax) | TX SNAP rules |
+| ... | State tax agencies | State HHS |
+
+### State Encoding Strategy
+
+For state income taxes, leverage federal foundation:
+
+```python
+# Most states piggyback federal AGI
+state_agi = federal_agi + state_additions - state_subtractions
+
+# Then apply state-specific brackets
+state_tax = apply_brackets(state_taxable_income, state_brackets[state])
+
+# State credits (often % of federal)
+state_eitc = federal_eitc * state_eitc_match_rate[state]
+```
+
+**Key insight:** ~60% of state tax code is reusable from federal.
+The RL system can transfer learning from federal to state encodings.
+
+---
+
+## Timeline (Revised)
+
+| Phase | Weeks | Scope | Variables |
+|-------|-------|-------|-----------|
+| A1 | 1-2 | Federal Tax Foundation | gross_income → AGI |
+| A2 | 3-4 | Federal Tax Calc | taxable_income → income_tax |
+| A3 | 5-6 | Federal Credits | EITC, CTC, AMT validation |
+| A4 | 7-8 | Federal Benefits | SNAP, Medicaid federal rules |
+| B1 | 9-12 | State Taxes (Top 10) | CA, NY, TX, FL, PA, IL, OH, GA, NC, MI |
+| B2 | 13-16 | State Taxes (Remaining) | 41 remaining states |
+| C1 | 17-20 | State Benefits | SNAP options, state EITC |
+| **Total** | **20 weeks** | **Full US coverage** |
 
 ---
 
