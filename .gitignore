@@ -45,3 +45,9 @@ Thumbs.db
 # Local config
 *.local.yaml
 *.local.json
+
+# Generated validation output
+CPS_VALIDATION_REPORT.md
+speed_metrics_report.json
+validation-results.json
+test_simple_validation.py
