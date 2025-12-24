@@ -444,10 +444,16 @@ See `cosilico-engine/docs/DESIGN.md` Section 12 for full architecture.
 | 2025-08-01 | 2026 | $2,000 | OBBBA passed July 2025 |
 | 2025-01-15 | 2024 | $2,000 | TCJA still in effect |
 
+**Three temporal dimensions:**
+1. **Vintage** (law-as-of) - explicitly modeled in parameters
+2. **Policy date** (tax year) - explicitly modeled in parameters
+3. **Model version** (Cosilico code) - tracked via git commit hash
+
 **Validation implications:**
 - Cosilico and PE must use **same vintage** (same understanding of future law)
 - When new law passes (OBBBA), create new vintage, don't modify old
 - For RL validation: always specify `(vintage, policy_year)` pair
+- Model version captured implicitly via git (reproducibility)
 
 ---
 
