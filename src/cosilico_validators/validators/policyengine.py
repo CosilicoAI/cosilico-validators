@@ -11,13 +11,23 @@ from cosilico_validators.validators.base import (
 
 # Variable mapping from common names to PolicyEngine variable names
 VARIABLE_MAPPING = {
+    # Tax credits
     "eitc": "eitc",
     "earned_income_credit": "eitc",
     "ctc": "ctc",
     "child_tax_credit": "ctc",
+    # Income tax
     "income_tax": "income_tax",
     "federal_income_tax": "income_tax",
     "state_income_tax": "state_income_tax",
+    # AMT
+    "amt": "alternative_minimum_tax",
+    "alternative_minimum_tax": "alternative_minimum_tax",
+    # Deductions
+    "salt_deduction": "salt_deduction",
+    "salt": "salt_deduction",
+    "standard_deduction": "standard_deduction",
+    # Benefits
     "snap": "snap",
     "snap_benefits": "snap",
     "medicaid": "medicaid",
@@ -105,6 +115,16 @@ class PolicyEngineValidator(BaseValidator):
             ),
             "state": lambda v: self._set_state(situation, v, year_str),
             "state_name": lambda v: self._set_state(situation, v, year_str),
+            # SALT inputs
+            "state_and_local_sales_or_income_tax": lambda v: self._set_person_var(
+                situation, "state_and_local_sales_or_income_tax", v, year_str
+            ),
+            "real_estate_taxes": lambda v: self._set_person_var(
+                situation, "real_estate_taxes", v, year_str
+            ),
+            "state_income_tax_paid": lambda v: self._set_person_var(
+                situation, "state_income_tax", v, year_str
+            ),
         }
 
         for key, value in inputs.items():
