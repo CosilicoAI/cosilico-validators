@@ -48,6 +48,25 @@ VARIABLE_MAPPING = {
     "medicaid": "medicaid",
     "tanf": "tanf",
     "ssi": "ssi",
+    # Social Security and payroll taxes
+    "taxable_social_security": "taxable_social_security",
+    "self_employment_tax": "self_employment_tax",
+    # Capital gains
+    "capital_gains_tax": "capital_gains_tax",
+    "long_term_capital_gains": "long_term_capital_gains",
+    "long_term_capital_gains_tax": "capital_gains_tax",
+    # Net Investment Income Tax (NIIT)
+    "net_investment_income_tax": "net_investment_income_tax",
+    "niit": "net_investment_income_tax",
+    # Additional Medicare Tax
+    "additional_medicare_tax": "additional_medicare_tax",
+    # Qualified Business Income Deduction
+    "qualified_business_income_deduction": "qualified_business_income_deduction",
+    "qbi_deduction": "qualified_business_income_deduction",
+    "qbi": "qualified_business_income_deduction",
+    # Premium Tax Credit
+    "premium_tax_credit": "premium_tax_credit",
+    "ptc": "premium_tax_credit",
     # Filing
     "filing_status": "filing_status",
 }
@@ -142,6 +161,24 @@ class PolicyEngineValidator(BaseValidator):
             ),
             "state_income_tax_paid": lambda v: self._set_person_var(
                 situation, "state_income_tax", v, year_str
+            ),
+            # Social Security inputs
+            "social_security": lambda v: self._set_person_var(
+                situation, "social_security", v, year_str
+            ),
+            "social_security_benefits": lambda v: self._set_person_var(
+                situation, "social_security", v, year_str
+            ),
+            # Self-employment inputs
+            "self_employment_income": lambda v: self._set_person_var(
+                situation, "self_employment_income", v, year_str
+            ),
+            # Capital gains inputs
+            "long_term_capital_gains": lambda v: self._set_person_var(
+                situation, "long_term_capital_gains", v, year_str
+            ),
+            "capital_gains": lambda v: self._set_person_var(
+                situation, "capital_gains", v, year_str
             ),
         }
 
