@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import sys
+import time
 
 
 @dataclass
@@ -35,6 +36,20 @@ class ComparisonResult:
 
 
 @dataclass
+class SpeedMetrics:
+    """Speed benchmark results for a variable."""
+
+    cosilico_time_ms: float  # Total execution time in milliseconds
+    pe_time_ms: float  # PolicyEngine execution time in milliseconds
+    n_cases: int  # Number of cases processed
+    cosilico_per_case_us: float  # Microseconds per case for Cosilico
+    pe_per_case_us: float  # Microseconds per case for PE
+    speedup: float  # PE time / Cosilico time (how many times faster)
+    cosilico_throughput: float  # Cases per second for Cosilico
+    pe_throughput: float  # Cases per second for PolicyEngine
+
+
+@dataclass
 class ValidationResult:
     """Result of validating a single variable."""
 
@@ -43,6 +58,7 @@ class ValidationResult:
     cosilico_values: Optional[np.ndarray] = None
     pe_comparison: Optional[ComparisonResult] = None
     taxsim_comparison: Optional[ComparisonResult] = None
+    speed_metrics: Optional[SpeedMetrics] = None
 
 
 class CPSValidationRunner:
@@ -317,22 +333,51 @@ class CPSValidationRunner:
         """Run validation for a single variable."""
         print(f"\nValidating {variable.title} ({variable.section})...")
 
-        # Run Cosilico
+        # Run Cosilico with timing
         print(f"  Running Cosilico ({variable.cosilico_file})...")
+        cosilico_start = time.perf_counter()
         cosilico_values = self._run_cosilico(variable)
+        cosilico_time = time.perf_counter() - cosilico_start
 
-        # Run PolicyEngine
+        # Run PolicyEngine with timing
         print(f"  Running PolicyEngine ({variable.pe_variable})...")
+        pe_start = time.perf_counter()
         pe_values = self._run_policyengine(variable)
+        pe_time = time.perf_counter() - pe_start
 
         # Get tax unit count
         sim = self._get_pe_simulation()
         n_tax_units = len(np.unique(sim.calculate("tax_unit_id", self.year)))
 
+        # Calculate speed metrics
+        speed_metrics = None
+        if cosilico_values is not None and cosilico_time > 0:
+            n_cases = len(cosilico_values)
+            cosilico_ms = cosilico_time * 1000
+            pe_ms = pe_time * 1000
+            cosilico_per_case_us = (cosilico_time * 1_000_000) / n_cases
+            pe_per_case_us = (pe_time * 1_000_000) / n_cases
+            speedup = pe_time / cosilico_time if cosilico_time > 0 else 0
+            cosilico_throughput = n_cases / cosilico_time if cosilico_time > 0 else 0
+            pe_throughput = n_cases / pe_time if pe_time > 0 else 0
+
+            speed_metrics = SpeedMetrics(
+                cosilico_time_ms=cosilico_ms,
+                pe_time_ms=pe_ms,
+                n_cases=n_cases,
+                cosilico_per_case_us=cosilico_per_case_us,
+                pe_per_case_us=pe_per_case_us,
+                speedup=speedup,
+                cosilico_throughput=cosilico_throughput,
+                pe_throughput=pe_throughput,
+            )
+            print(f"  Speed: Cosilico {cosilico_ms:.1f}ms, PE {pe_ms:.1f}ms ({speedup:.0f}x faster)")
+
         result = ValidationResult(
             variable=variable,
             n_tax_units=n_tax_units,
             cosilico_values=cosilico_values,
+            speed_metrics=speed_metrics,
         )
 
         # Compare Cosilico vs PE
@@ -380,7 +425,25 @@ class CPSValidationRunner:
                 print(f"  vs PolicyEngine: {result.pe_comparison.match_rate:.1%} match")
                 if result.taxsim_comparison:
                     print(f"  vs TAXSIM: {result.taxsim_comparison.match_rate:.1%} match")
+                if result.speed_metrics:
+                    print(f"  Speed: {result.speed_metrics.speedup:.0f}x faster than PE")
             else:
                 print(f"{result.variable.title}: Cosilico not available")
+
+        # Speed summary
+        total_cosilico_ms = sum(
+            r.speed_metrics.cosilico_time_ms
+            for r in self.results.values()
+            if r.speed_metrics
+        )
+        total_pe_ms = sum(
+            r.speed_metrics.pe_time_ms
+            for r in self.results.values()
+            if r.speed_metrics
+        )
+        if total_cosilico_ms > 0:
+            print(f"\nOverall Speed: {total_pe_ms / total_cosilico_ms:.0f}x faster than PE")
+            print(f"  Cosilico: {total_cosilico_ms:.1f}ms total")
+            print(f"  PolicyEngine: {total_pe_ms:.1f}ms total")
 
         return self.results

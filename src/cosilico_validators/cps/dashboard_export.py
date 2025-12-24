@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import subprocess
 
-from .runner import ValidationResult, ComparisonResult, CPSValidationRunner
+from .runner import ValidationResult, ComparisonResult, SpeedMetrics, CPSValidationRunner
 
 
 def get_git_commit() -> str:
@@ -58,6 +58,20 @@ def comparison_to_breakdown(comp: ComparisonResult) -> Dict[str, Any]:
     }
 
 
+def speed_metrics_to_dict(metrics: SpeedMetrics) -> Dict[str, Any]:
+    """Convert SpeedMetrics to dictionary for JSON export."""
+    return {
+        "cosilicoTimeMs": metrics.cosilico_time_ms,
+        "peTimeMs": metrics.pe_time_ms,
+        "nCases": metrics.n_cases,
+        "cosilicoPerCaseUs": metrics.cosilico_per_case_us,
+        "pePerCaseUs": metrics.pe_per_case_us,
+        "speedup": metrics.speedup,
+        "cosilicoThroughput": metrics.cosilico_throughput,
+        "peThroughput": metrics.pe_throughput,
+    }
+
+
 def result_to_section(result: ValidationResult) -> Dict[str, Any]:
     """Convert ValidationResult to dashboard section format."""
     section = {
@@ -73,6 +87,10 @@ def result_to_section(result: ValidationResult) -> Dict[str, Any]:
             "meanAbsoluteError": 0,
         },
     }
+
+    # Add speed metrics if available
+    if result.speed_metrics:
+        section["speed"] = speed_metrics_to_dict(result.speed_metrics)
 
     # Add validator breakdown
     validator_breakdown = {}
@@ -141,12 +159,23 @@ def export_dashboard_json(
     total_mae = 0
     mae_count = 0
 
+    # Aggregate speed metrics
+    total_cosilico_time_ms = 0
+    total_pe_time_ms = 0
+    total_cases = 0
+    speed_count = 0
+
     for r in results.values():
         if r.pe_comparison:
             total_comparisons += r.pe_comparison.n_compared
             total_matches += r.pe_comparison.n_matches
             total_mae += r.pe_comparison.mean_absolute_error
             mae_count += 1
+        if r.speed_metrics:
+            total_cosilico_time_ms += r.speed_metrics.cosilico_time_ms
+            total_pe_time_ms += r.speed_metrics.pe_time_ms
+            total_cases += r.speed_metrics.n_cases
+            speed_count += 1
 
     # Build sections
     sections = [result_to_section(r) for r in results.values()]
@@ -176,6 +205,18 @@ def export_dashboard_json(
         },
     ]
 
+    # Calculate overall speed metrics
+    overall_speed = None
+    if speed_count > 0 and total_cosilico_time_ms > 0:
+        overall_speed = {
+            "cosilicoTotalMs": total_cosilico_time_ms,
+            "peTotalMs": total_pe_time_ms,
+            "totalCases": total_cases,
+            "speedup": total_pe_time_ms / total_cosilico_time_ms,
+            "cosilicoThroughput": total_cases / (total_cosilico_time_ms / 1000),
+            "peThroughput": total_cases / (total_pe_time_ms / 1000) if total_pe_time_ms > 0 else 0,
+        }
+
     report = {
         "isSampleData": False,
         "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -192,6 +233,10 @@ def export_dashboard_json(
         },
         "validators": validators,
     }
+
+    # Add overall speed if available
+    if overall_speed:
+        report["overall"]["speed"] = overall_speed
 
     # Write JSON
     output_path.parent.mkdir(parents=True, exist_ok=True)
