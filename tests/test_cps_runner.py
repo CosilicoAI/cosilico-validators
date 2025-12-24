@@ -98,8 +98,8 @@ class TestCPSValidationRunner:
 
     def test_variables_configured(self):
         """Test that default variables are configured."""
-        runner = CPSValidationRunner()
-        var_names = [v.name for v in runner.VARIABLES]
+        variables = CPSValidationRunner.get_variables()
+        var_names = [v.name for v in variables]
         assert "ctc" in var_names
         assert "eitc" in var_names
         assert "standard_deduction" in var_names
@@ -107,8 +107,8 @@ class TestCPSValidationRunner:
 
     def test_ctc_config(self):
         """Test CTC variable configuration."""
-        runner = CPSValidationRunner()
-        ctc = next(v for v in runner.VARIABLES if v.name == "ctc")
+        variables = CPSValidationRunner.get_variables()
+        ctc = next(v for v in variables if v.name == "ctc")
         assert ctc.section == "26/24"
         assert ctc.pe_variable == "ctc"
         assert ctc.taxsim_variable == "v22"

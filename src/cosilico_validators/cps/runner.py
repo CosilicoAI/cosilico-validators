@@ -129,6 +129,7 @@ class CPSValidationRunner:
         self.results: Dict[str, ValidationResult] = {}
         self._sim = None
         self._cosilico_executor = None
+        self._entity_index = None
 
     def _get_pe_simulation(self):
         """Get or create PolicyEngine Microsimulation."""
@@ -167,6 +168,48 @@ class CPSValidationRunner:
             self._cosilico_executor = VectorizedExecutor(parameters=params)
 
         return self._cosilico_executor
+
+    def _get_entity_index(self):
+        """Get or create EntityIndex from PolicyEngine simulation for entity aggregation."""
+        if self._entity_index is not None:
+            return self._entity_index
+
+        # Add cosilico-engine to path if needed
+        engine_path = Path.home() / "CosilicoAI/cosilico-engine/src"
+        if str(engine_path) not in sys.path:
+            sys.path.insert(0, str(engine_path))
+
+        from cosilico.vectorized_executor import EntityIndex
+
+        sim = self._get_pe_simulation()
+
+        # Get entity IDs
+        person_tax_unit_id = sim.calculate("person_tax_unit_id", self.year)
+        tax_unit_id = sim.calculate("tax_unit_id", self.year)
+        tax_unit_household_id = sim.calculate("tax_unit_household_id", self.year)
+        household_id = sim.calculate("household_id", self.year)
+
+        # Build person -> tax_unit mapping (index into unique tax_unit_ids)
+        unique_tax_unit_ids = np.unique(tax_unit_id)
+        tax_unit_id_to_idx = {tid: i for i, tid in enumerate(unique_tax_unit_ids)}
+        person_to_tax_unit = np.array([tax_unit_id_to_idx[tid] for tid in person_tax_unit_id])
+
+        # Build tax_unit -> household mapping
+        unique_household_ids = np.unique(household_id)
+        household_id_to_idx = {hid: i for i, hid in enumerate(unique_household_ids)}
+        tax_unit_to_household = np.array([
+            household_id_to_idx[hid] for hid in tax_unit_household_id
+        ])
+
+        self._entity_index = EntityIndex(
+            person_to_tax_unit=person_to_tax_unit,
+            tax_unit_to_household=tax_unit_to_household,
+            n_persons=len(person_tax_unit_id),
+            n_tax_units=len(unique_tax_unit_ids),
+            n_households=len(unique_household_ids),
+        )
+
+        return self._entity_index
 
     def _extract_inputs_from_pe(self) -> Dict[str, np.ndarray]:
         """Extract input variables from PolicyEngine simulation as numpy arrays."""
@@ -223,14 +266,16 @@ class CPSValidationRunner:
         try:
             executor = self._get_cosilico_executor()
             inputs = self._extract_inputs_from_pe()
+            entity_index = self._get_entity_index()
 
             with open(cosilico_path) as f:
                 code = f.read()
 
-            # Execute vectorized
+            # Execute vectorized with entity index for aggregation support
             results = executor.execute(
                 code=code,
                 inputs=inputs,
+                entity_index=entity_index,
                 output_variables=[variable.cosilico_variable],
             )
 
@@ -238,6 +283,8 @@ class CPSValidationRunner:
 
         except Exception as e:
             print(f"  {variable.name}: Cosilico execution error - {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def _run_policyengine(self, variable: VariableConfig) -> np.ndarray:
