@@ -1,0 +1,386 @@
+# TaxSim Validation Test Cases
+# These cases cover a range of tax scenarios for validating Cosilico calculations
+# against NBER TaxSim 35.
+#
+# Reference: https://taxsim.nber.org/taxsim35/
+
+test_cases:
+  # =============================================================================
+  # SIMPLE CASES - Basic scenarios with wages only
+  # =============================================================================
+
+  - name: "Single filer with wages only"
+    description: "Basic single filer with only wage income"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 35
+      primary_wages: 50000
+      num_dependents: 0
+    expected:
+      # Expected values should be filled in from TaxSim results
+      # These are approximate for reference
+      adjusted_gross_income: 50000
+    citation: "26 USC Section 62 (AGI)"
+
+  - name: "Single filer - low income"
+    description: "Low-income single filer near EITC phase-in"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 30
+      primary_wages: 15000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 15000
+
+  - name: "Single filer - high income"
+    description: "High-income single filer with standard deduction"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 45
+      primary_wages: 250000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 250000
+
+  # =============================================================================
+  # MARRIED FILING JOINTLY - Joint filers with various incomes
+  # =============================================================================
+
+  - name: "MFJ with 2 children"
+    description: "Married couple filing jointly with two qualifying children"
+    inputs:
+      year: 2023
+      filing_status: JOINT
+      primary_age: 40
+      spouse_age: 38
+      primary_wages: 75000
+      spouse_wages: 45000
+      num_dependents: 2
+      child_ages: [10, 8]
+    expected:
+      adjusted_gross_income: 120000
+    citation: "26 USC Section 24 (CTC)"
+
+  - name: "MFJ with single earner"
+    description: "Married couple with one working spouse"
+    inputs:
+      year: 2023
+      filing_status: JOINT
+      primary_age: 42
+      spouse_age: 40
+      primary_wages: 90000
+      spouse_wages: 0
+      num_dependents: 1
+      child_ages: [5]
+    expected:
+      adjusted_gross_income: 90000
+
+  - name: "MFJ high income - CTC phase-out"
+    description: "Joint filers above CTC phase-out threshold"
+    inputs:
+      year: 2023
+      filing_status: JOINT
+      primary_age: 50
+      spouse_age: 48
+      primary_wages: 225000
+      spouse_wages: 175000
+      num_dependents: 3
+      child_ages: [15, 12, 9]
+    expected:
+      adjusted_gross_income: 400000
+    notes: "CTC begins phasing out at $400,000 for MFJ"
+
+  # =============================================================================
+  # SELF-EMPLOYMENT INCOME - SE tax calculations
+  # =============================================================================
+
+  - name: "Self-employment income only"
+    description: "Single filer with only self-employment income"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 35
+      primary_self_employment: 60000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 55764  # 60000 - (60000 * 0.9235 * 0.0765 * 0.5)
+    notes: "AGI reduced by 50% of SE tax"
+    citation: "26 USC Section 1402 (SE Tax)"
+
+  - name: "Mixed wages and self-employment"
+    description: "Filer with both W-2 wages and SE income"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 40
+      primary_wages: 30000
+      primary_self_employment: 25000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 53235  # Approximate
+
+  # =============================================================================
+  # INVESTMENT INCOME - Dividends and capital gains
+  # =============================================================================
+
+  - name: "Investment income - dividends"
+    description: "Single filer with qualified dividends"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 55
+      primary_wages: 40000
+      dividends: 10000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 50000
+    notes: "Qualified dividends taxed at preferential rates"
+    citation: "26 USC Section 1(h)"
+
+  - name: "Investment income - capital gains"
+    description: "Single filer with long-term capital gains"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 60
+      primary_wages: 50000
+      long_term_gains: 25000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 75000
+
+  - name: "Mixed investment income"
+    description: "Filer with multiple investment income types"
+    inputs:
+      year: 2023
+      filing_status: JOINT
+      primary_age: 58
+      spouse_age: 56
+      primary_wages: 100000
+      dividends: 15000
+      interest: 5000
+      short_term_gains: 8000
+      long_term_gains: 20000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 148000
+
+  # =============================================================================
+  # EITC-ELIGIBLE HOUSEHOLDS - Earned Income Credit scenarios
+  # =============================================================================
+
+  - name: "EITC single - no children"
+    description: "Low-income single filer eligible for EITC without children"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 30
+      primary_wages: 12000
+      num_dependents: 0
+    expected:
+      earned_income_credit: 600  # Approximate
+    notes: "EITC for childless workers"
+    citation: "26 USC Section 32"
+
+  - name: "EITC single - one child"
+    description: "Single parent with one qualifying child"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 28
+      primary_wages: 25000
+      num_dependents: 1
+      child_ages: [5]
+    expected:
+      earned_income_credit: 3800  # Approximate
+    citation: "26 USC Section 32(b)(1)(A)"
+
+  - name: "EITC MFJ - two children"
+    description: "Married couple with two children at EITC maximum"
+    inputs:
+      year: 2023
+      filing_status: JOINT
+      primary_age: 32
+      spouse_age: 30
+      primary_wages: 22000
+      spouse_wages: 0
+      num_dependents: 2
+      child_ages: [8, 6]
+    expected:
+      earned_income_credit: 6604  # Maximum EITC for 2 children (2023)
+    notes: "Near maximum EITC range"
+
+  - name: "EITC - three or more children"
+    description: "Head of household with three qualifying children"
+    inputs:
+      year: 2023
+      filing_status: HEAD_OF_HOUSEHOLD
+      primary_age: 35
+      primary_wages: 30000
+      num_dependents: 3
+      child_ages: [12, 9, 4]
+    expected:
+      earned_income_credit: 7430  # Maximum EITC for 3+ children (2023)
+    citation: "26 USC Section 32(b)(1)(A)"
+
+  - name: "EITC phase-out"
+    description: "Income in EITC phase-out range"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 33
+      primary_wages: 40000
+      num_dependents: 1
+      child_ages: [7]
+    expected:
+      earned_income_credit: 1500  # Approximate - in phase-out
+    notes: "Income above maximum credit range"
+
+  # =============================================================================
+  # AMT-AFFECTED HOUSEHOLDS - Alternative Minimum Tax
+  # =============================================================================
+
+  - name: "AMT - high deductions"
+    description: "High-income filer with large state/local tax deductions"
+    inputs:
+      year: 2023
+      filing_status: JOINT
+      primary_age: 52
+      spouse_age: 50
+      primary_wages: 350000
+      spouse_wages: 150000
+      property_tax: 25000
+      other_itemized: 30000
+      mortgage_interest: 20000
+      num_dependents: 2
+      child_ages: [16, 14]
+    expected:
+      adjusted_gross_income: 500000
+    notes: "SALT cap limits state/local deduction to $10,000"
+    citation: "26 USC Section 55"
+
+  - name: "AMT - incentive stock options"
+    description: "Filer with ISO income potentially triggering AMT"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 45
+      primary_wages: 200000
+      other_income: 50000  # ISO spread as other income
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 250000
+    notes: "ISO exercises can trigger AMT"
+
+  # =============================================================================
+  # RETIREMENT INCOME - Social Security and pensions
+  # =============================================================================
+
+  - name: "Social Security - partially taxable"
+    description: "Retiree with partially taxable Social Security"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 67
+      social_security: 24000
+      pensions: 20000
+      interest: 2000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 42400  # Approximate - 85% SS taxable
+    notes: "Combined income determines SS taxation"
+    citation: "26 USC Section 86"
+
+  - name: "Social Security - fully taxable"
+    description: "Higher-income retiree with 85% SS taxable"
+    inputs:
+      year: 2023
+      filing_status: JOINT
+      primary_age: 70
+      spouse_age: 68
+      social_security: 50000
+      pensions: 60000
+      dividends: 15000
+      interest: 5000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 122500  # Approximate
+
+  # =============================================================================
+  # HEAD OF HOUSEHOLD - Special filing status
+  # =============================================================================
+
+  - name: "Head of household - one child"
+    description: "HOH filer with one qualifying child"
+    inputs:
+      year: 2023
+      filing_status: HEAD_OF_HOUSEHOLD
+      primary_age: 38
+      primary_wages: 55000
+      num_dependents: 1
+      child_ages: [10]
+    expected:
+      adjusted_gross_income: 55000
+    citation: "26 USC Section 2(b)"
+
+  # =============================================================================
+  # EDGE CASES - Boundary conditions
+  # =============================================================================
+
+  - name: "Zero income"
+    description: "Filer with no income"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 25
+      primary_wages: 0
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 0
+      child_tax_credit: 0
+      earned_income_credit: 0
+
+  - name: "Young worker - under age 25"
+    description: "Young worker potentially ineligible for childless EITC"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 22
+      primary_wages: 12000
+      num_dependents: 0
+    expected:
+      earned_income_credit: 0  # Under 25, no EITC without children
+    notes: "EITC age requirement for childless workers"
+    citation: "26 USC Section 32(c)(1)(A)(ii)"
+
+  - name: "Senior citizen - over 65"
+    description: "Senior with additional standard deduction"
+    inputs:
+      year: 2023
+      filing_status: SINGLE
+      primary_age: 67
+      primary_wages: 30000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 30000
+    notes: "Additional $1,850 standard deduction for 65+"
+
+  - name: "Very high income - NIIT threshold"
+    description: "Filer above Net Investment Income Tax threshold"
+    inputs:
+      year: 2023
+      filing_status: JOINT
+      primary_age: 55
+      spouse_age: 53
+      primary_wages: 400000
+      spouse_wages: 0
+      dividends: 50000
+      long_term_gains: 100000
+      num_dependents: 0
+    expected:
+      adjusted_gross_income: 550000
+    notes: "MAGI above $250,000 MFJ threshold for NIIT"
+    citation: "26 USC Section 1411"
