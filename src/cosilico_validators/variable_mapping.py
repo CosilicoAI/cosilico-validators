@@ -67,7 +67,7 @@ VARIABLE_MAPPINGS: Dict[str, VariableMapping] = {
     # §63 - Standard Deduction
     "standard_deduction": VariableMapping(
         cosilico_variable="standard_deduction",
-        cosilico_file="statute/26/63/standard_deduction.cosilico",
+        cosilico_file="statute/26/63/c/standard_deduction.cosilico",
         statute="26 USC § 63",
         title="Standard Deduction",
         pe_variable="standard_deduction",
@@ -137,7 +137,7 @@ VARIABLE_MAPPINGS: Dict[str, VariableMapping] = {
     # §199A - Qualified Business Income Deduction
     "qbi_deduction": VariableMapping(
         cosilico_variable="qualified_business_income_deduction",
-        cosilico_file="statute/26/199A/qbi_deduction.cosilico",
+        cosilico_file="statute/26/199A/a/qbi_deduction.cosilico",
         statute="26 USC § 199A",
         title="Qualified Business Income Deduction",
         pe_variable="qualified_business_income_deduction",
@@ -148,7 +148,7 @@ VARIABLE_MAPPINGS: Dict[str, VariableMapping] = {
     # §36B - Premium Tax Credit
     "ptc": VariableMapping(
         cosilico_variable="premium_tax_credit",
-        cosilico_file="statute/26/36B/premium_tax_credit.cosilico",
+        cosilico_file="statute/26/36B/a/premium_tax_credit.cosilico",
         statute="26 USC § 36B",
         title="Premium Tax Credit",
         pe_variable="premium_tax_credit",
