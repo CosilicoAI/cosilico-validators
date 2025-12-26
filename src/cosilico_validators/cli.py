@@ -244,6 +244,381 @@ def validators(variable):
     console.print(table)
 
 
+@cli.command("validate-encoding")
+@click.argument("cosilico_file", type=click.Path(exists=True))
+@click.option("--variable", "-v", help="Variable name to validate (auto-detected from file if not specified)")
+@click.option("--year", "-y", default=2024, type=int, help="Tax year for validation")
+@click.option("--output", "-o", type=click.Path(), help="Output file for JSON results")
+@click.option("--no-policyengine", is_flag=True, help="Skip PolicyEngine validation")
+@click.option("--plugin-version", default="v0.1.0", help="Plugin version for tracking")
+@click.option("--json-output", is_flag=True, help="Output only JSON (for machine parsing)")
+def validate_encoding(cosilico_file, variable, year, output, no_policyengine, plugin_version, json_output):
+    """Validate a .cosilico encoding against PolicyEngine.
+
+    Takes a .cosilico file path and runs the full encoding -> validation -> diagnosis loop.
+    Looks for tests.yaml in the same directory as the .cosilico file.
+
+    Examples:
+
+        cosilico-validators validate-encoding statute/26/32/a/1/earned_income_credit.cosilico
+
+        cosilico-validators validate-encoding path/to/agi.cosilico -v adjusted_gross_income --output results.json
+    """
+    import yaml
+    from dataclasses import asdict
+
+    cosilico_path = Path(cosilico_file)
+
+    # Find tests.yaml in the same directory or parent directories
+    tests_yaml = None
+    search_dir = cosilico_path.parent
+    for _ in range(5):  # Search up to 5 levels
+        candidate = search_dir / "tests.yaml"
+        if candidate.exists():
+            tests_yaml = candidate
+            break
+        search_dir = search_dir.parent
+
+    if tests_yaml is None:
+        if json_output:
+            result = {"error": f"No tests.yaml found near {cosilico_file}"}
+            console.print_json(data=result)
+        else:
+            raise click.ClickException(f"No tests.yaml found near {cosilico_file}")
+        return
+
+    # Load tests.yaml
+    with open(tests_yaml) as f:
+        test_data = yaml.safe_load(f)
+
+    # Extract variable name if not specified
+    if not variable:
+        variable = test_data.get("variable")
+        if not variable:
+            # Try to infer from filename
+            variable = cosilico_path.stem
+        if not variable:
+            if json_output:
+                result = {"error": "Could not determine variable name. Use --variable option."}
+                console.print_json(data=result)
+            else:
+                raise click.ClickException("Could not determine variable name. Use --variable option.")
+            return
+
+    # Extract test cases (support both "test_cases" and "tests" keys)
+    test_cases = test_data.get("test_cases", test_data.get("tests", []))
+    if not test_cases:
+        if json_output:
+            result = {"error": "No test_cases or tests found in tests.yaml"}
+            console.print_json(data=result)
+        else:
+            raise click.ClickException("No test_cases or tests found in tests.yaml")
+        return
+
+    # Derive statute reference from path
+    statute_ref = _derive_statute_ref(cosilico_path)
+
+    if not json_output:
+        console.print(f"\n[bold cyan]Validating:[/bold cyan] {variable}")
+        console.print(f"[dim]Statute:[/dim] {statute_ref}")
+        console.print(f"[dim]Tests:[/dim] {len(test_cases)} test cases from {tests_yaml}")
+        console.print(f"[dim]Year:[/dim] {year}")
+        console.print()
+
+    # Run validation
+    if no_policyengine:
+        # Minimal validation without PE
+        result = {
+            "variable": variable,
+            "statute_ref": statute_ref,
+            "plugin_version": plugin_version,
+            "test_count": len(test_cases),
+            "match_rate": None,
+            "passed": None,
+            "status": "skipped",
+            "message": "PolicyEngine validation skipped (--no-policyengine)",
+        }
+    else:
+        try:
+            from cosilico_validators.encoding_orchestrator import EncodingOrchestrator
+
+            orchestrator = EncodingOrchestrator(plugin_version=plugin_version)
+            session = orchestrator.encode_and_validate(
+                variable=variable,
+                statute_ref=statute_ref,
+                test_cases=test_cases,
+                year=year,
+            )
+
+            result = _session_to_dict(session)
+
+            # Add farness forecast tracking info if diagnosis suggests improvement
+            if session.diagnosis and session.improvement_decision_id:
+                result["farness_tracking"] = {
+                    "decision_id": session.improvement_decision_id,
+                    "layer": session.diagnosis.layer.value,
+                    "suggested_fix": session.diagnosis.suggested_fix,
+                    "forecast_logged": True,
+                }
+
+        except ImportError as e:
+            result = {
+                "variable": variable,
+                "error": f"Failed to import validation components: {e}",
+                "status": "error",
+            }
+        except Exception as e:
+            result = {
+                "variable": variable,
+                "error": str(e),
+                "status": "error",
+            }
+
+    # Output results
+    if json_output:
+        console.print_json(data=result)
+    else:
+        _display_encoding_result(result)
+
+    # Save to file if requested
+    if output:
+        with open(output, "w") as f:
+            json.dump(result, f, indent=2)
+        if not json_output:
+            console.print(f"\n[green]Results saved to {output}[/green]")
+
+
+def _derive_statute_ref(cosilico_path: Path) -> str:
+    """Derive statute reference from file path.
+
+    E.g., statute/26/32/a/1/earned_income_credit.cosilico -> "26 USC 32(a)(1)"
+    """
+    parts = cosilico_path.parts
+    try:
+        # Find 'statute' in path
+        statute_idx = parts.index("statute")
+        remaining = parts[statute_idx + 1:-1]  # Exclude filename
+
+        if len(remaining) >= 2:
+            title = remaining[0]
+            section = remaining[1]
+
+            # Build subsections
+            subsections = ""
+            for part in remaining[2:]:
+                if part.isdigit():
+                    subsections += f"({part})"
+                else:
+                    subsections += f"({part})"
+
+            return f"{title} USC {section}{subsections}"
+    except ValueError:
+        pass
+
+    return f"Unknown ({cosilico_path.name})"
+
+
+def _session_to_dict(session) -> dict:
+    """Convert EncodingSession to a JSON-serializable dict."""
+    result = {
+        "variable": session.variable,
+        "statute_ref": session.statute_ref,
+        "plugin_version": session.plugin_version,
+        "timestamp": session.timestamp,
+        "test_count": len(session.test_cases),
+    }
+
+    if session.validation_result:
+        result.update({
+            "match_rate": session.validation_result.match_rate,
+            "passed": session.validation_result.passed,
+            "status": session.validation_result.status.value,
+            "reward_signal": session.validation_result.reward_signal,
+            "issues": session.validation_result.issues,
+            "upstream_bugs": session.validation_result.upstream_bugs,
+        })
+    else:
+        result["status"] = "no_result"
+
+    if session.diagnosis:
+        result["diagnosis"] = {
+            "layer": session.diagnosis.layer.value,
+            "confidence": session.diagnosis.confidence,
+            "explanation": session.diagnosis.explanation,
+            "suggested_fix": session.diagnosis.suggested_fix,
+            "evidence": session.diagnosis.evidence if hasattr(session.diagnosis, "evidence") else [],
+        }
+
+    if session.improvement_decision_id:
+        result["improvement_decision_id"] = session.improvement_decision_id
+
+    return result
+
+
+def _display_encoding_result(result: dict):
+    """Display encoding validation result in a nice format."""
+    status = result.get("status", "unknown")
+    passed = result.get("passed")
+    match_rate = result.get("match_rate")
+
+    # Status header
+    if status == "passed" or passed:
+        status_str = "[bold green]PASSED[/bold green]"
+    elif status == "error":
+        status_str = "[bold red]ERROR[/bold red]"
+    elif status == "skipped":
+        status_str = "[bold yellow]SKIPPED[/bold yellow]"
+    else:
+        status_str = "[bold red]FAILED[/bold red]"
+
+    console.print(Panel(
+        f"Variable: [cyan]{result.get('variable', 'unknown')}[/cyan]\n"
+        f"Status: {status_str}\n"
+        f"Match Rate: {f'{match_rate:.1%}' if match_rate is not None else 'N/A'}\n"
+        f"Test Count: {result.get('test_count', 0)}",
+        title="[bold]Validation Result[/bold]",
+        border_style="green" if passed else "red" if status == "error" else "yellow",
+    ))
+
+    # Show diagnosis if present
+    if "diagnosis" in result:
+        diag = result["diagnosis"]
+        console.print(Panel(
+            f"Layer: [magenta]{diag.get('layer', 'unknown')}[/magenta]\n"
+            f"Confidence: {diag.get('confidence', 0):.0%}\n"
+            f"Explanation: {diag.get('explanation', 'N/A')}\n"
+            f"Suggested Fix: [yellow]{diag.get('suggested_fix', 'N/A')}[/yellow]",
+            title="[bold]Diagnosis[/bold]",
+            border_style="yellow",
+        ))
+
+    # Show farness tracking if present
+    if "farness_tracking" in result:
+        ft = result["farness_tracking"]
+        console.print(Panel(
+            f"Decision ID: [cyan]{ft.get('decision_id', 'N/A')}[/cyan]\n"
+            f"Forecast Logged: {'Yes' if ft.get('forecast_logged') else 'No'}",
+            title="[bold]Farness Tracking[/bold]",
+            border_style="blue",
+        ))
+
+    # Show error if present
+    if "error" in result:
+        console.print(Panel(
+            f"[red]{result['error']}[/red]",
+            title="[bold red]Error[/bold red]",
+            border_style="red",
+        ))
+
+
+@cli.command("record-outcome")
+@click.argument("decision_id")
+@click.option("--match-rate", "-m", type=float, required=True, help="Actual match rate achieved (0-1)")
+@click.option("--reflections", "-r", default="", help="Reflections on why actuals differed from forecast")
+@click.option("--json-output", is_flag=True, help="Output only JSON (for machine parsing)")
+def record_outcome(decision_id, match_rate, reflections, json_output):
+    """Record actual outcome for a forecasted improvement decision.
+
+    This closes the farness calibration loop by recording what actually happened
+    after applying a suggested fix. The system uses this to calibrate future
+    forecasts.
+
+    Examples:
+
+        cosilico-validators record-outcome abc123 --match-rate 0.95
+
+        cosilico-validators record-outcome abc123 -m 0.85 -r "Phase-out was more complex than expected"
+    """
+    from cosilico_validators.improvement_decisions import get_decision_log
+
+    log = get_decision_log()
+
+    # Convert match rate to percentage points for consistency with forecasts
+    actual_outcomes = {"match_rate": match_rate * 100 if match_rate <= 1 else match_rate}
+
+    try:
+        calibration = log.record_outcome(
+            decision_id=decision_id,
+            actual_outcomes=actual_outcomes,
+            reflections=reflections,
+        )
+
+        if json_output:
+            console.print_json(data=calibration)
+        else:
+            if "error" in calibration:
+                console.print(Panel(
+                    f"[red]{calibration['error']}[/red]",
+                    title="[bold red]Error[/bold red]",
+                    border_style="red",
+                ))
+            else:
+                # Display calibration result
+                kpi_results = []
+                for kpi_name, kpi_data in calibration.get("kpis", {}).items():
+                    in_interval = kpi_data.get("in_interval", False)
+                    status = "[green]IN CI[/green]" if in_interval else "[red]OUTSIDE CI[/red]"
+                    kpi_results.append(
+                        f"{kpi_name}: predicted {kpi_data.get('predicted', 'N/A'):.1f}pp, "
+                        f"actual {kpi_data.get('actual', 'N/A'):.1f}pp {status}"
+                    )
+
+                console.print(Panel(
+                    f"Decision: [cyan]{decision_id}[/cyan]\n"
+                    f"Option: {calibration.get('option', 'N/A')}\n\n"
+                    f"Results:\n" + "\n".join(kpi_results) + "\n\n"
+                    f"Coverage: {calibration.get('coverage', 0):.0%}\n"
+                    f"Mean Error: {calibration.get('overall_error', 0):.1f}pp",
+                    title="[bold]Outcome Recorded[/bold]",
+                    border_style="green" if calibration.get("overall_in_interval") else "yellow",
+                ))
+
+    except Exception as e:
+        if json_output:
+            console.print_json(data={"error": str(e)})
+        else:
+            console.print(Panel(
+                f"[red]{str(e)}[/red]",
+                title="[bold red]Error[/bold red]",
+                border_style="red",
+            ))
+
+
+@cli.command("calibration-summary")
+@click.option("--json-output", is_flag=True, help="Output only JSON (for machine parsing)")
+def calibration_summary(json_output):
+    """Show calibration summary for improvement forecasts.
+
+    Displays how well past forecasts have matched actual outcomes,
+    helping identify if the system is overconfident or underconfident.
+    """
+    from cosilico_validators.improvement_decisions import get_decision_log
+
+    log = get_decision_log()
+    summary = log.get_calibration_summary()
+
+    if json_output:
+        console.print_json(data=summary)
+    else:
+        coverage = summary.get('coverage')
+        coverage_str = f"{coverage:.0%}" if coverage is not None else "N/A"
+        cal_error = summary.get('calibration_error')
+        cal_error_str = f"{cal_error:+.1%}" if cal_error is not None else "N/A"
+        mae = summary.get('mean_absolute_error')
+        mae_str = f"{mae:.1f}pp" if mae is not None else "N/A"
+
+        console.print(Panel(
+            f"Total Decisions: {summary.get('n_decisions', 0)}\n"
+            f"Expected Coverage: {summary.get('expected_coverage', 0.8):.0%}\n"
+            f"Actual Coverage: {coverage_str}\n"
+            f"Calibration Error: {cal_error_str}\n"
+            f"Mean Absolute Error: {mae_str}\n\n"
+            f"[dim]{summary.get('interpretation', 'No forecasts scored yet')}[/dim]",
+            title="[bold]Calibration Summary[/bold]",
+            border_style="blue",
+        ))
+
+
 @cli.command()
 @click.argument("results_file", type=click.Path(exists=True))
 @click.option("--repo", "-r", help="Target repo for issues (e.g., PolicyEngine/policyengine-us)")
