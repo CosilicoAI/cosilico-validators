@@ -80,25 +80,30 @@ def compare_records(
     }
 
 
-def load_pe_values(variable: str, year: int = 2024) -> np.ndarray:
+def load_pe_values(variable: str, year: int = 2024, return_ids: bool = False):
     """Load PolicyEngine values for a variable across CPS.
 
     Args:
         variable: PolicyEngine variable name
         year: Tax year
+        return_ids: If True, return (values, tax_unit_ids) tuple
 
     Returns:
-        Array of values for each tax unit
+        Array of values for each tax unit, or (values, ids) tuple
     """
     if not HAS_POLICYENGINE:
         raise ImportError("policyengine_us not installed")
 
     sim = Microsimulation()
-    values = sim.calculate(variable, year)
-    return np.array(values)
+    values = np.array(sim.calculate(variable, year))
+
+    if return_ids:
+        ids = np.array(sim.calculate("tax_unit_id", year))
+        return values, ids
+    return values
 
 
-def load_cosilico_values(variable: str, year: int = 2024) -> np.ndarray:
+def load_cosilico_values(variable: str, year: int = 2024, return_ids: bool = False):
     """Load Cosilico-computed values for a variable across CPS.
 
     Uses the cosilico-data-sources runner infrastructure to compute values
@@ -107,9 +112,10 @@ def load_cosilico_values(variable: str, year: int = 2024) -> np.ndarray:
     Args:
         variable: Variable name (e.g., 'eitc', 'income_tax', 'ctc')
         year: Tax year
+        return_ids: If True, return (values, tax_unit_ids) tuple
 
     Returns:
-        Array of values for each tax unit
+        Array of values for each tax unit, or (values, ids) tuple
 
     Raises:
         ImportError: If cosilico-data-sources not available
@@ -153,7 +159,46 @@ def load_cosilico_values(variable: str, year: int = 2024) -> np.ndarray:
             f"Variable '{variable}' not found. Available: {list(column_map.keys())}"
         )
 
-    return np.array(df[col].values)
+    values = np.array(df[col].values)
+
+    if return_ids:
+        ids = np.array(df["tax_unit_id"].values)
+        return values, ids
+    return values
+
+
+def align_records(cos_values: np.ndarray, cos_ids: np.ndarray,
+                   pe_values: np.ndarray, pe_ids: np.ndarray):
+    """Align records by tax_unit_id for comparison.
+
+    Uses vectorized merge via sorted index lookup for performance.
+
+    Args:
+        cos_values: Cosilico computed values
+        cos_ids: Cosilico tax unit IDs
+        pe_values: PolicyEngine computed values
+        pe_ids: PolicyEngine tax unit IDs
+
+    Returns:
+        Tuple of (aligned_cos_values, aligned_pe_values, matched_ids)
+    """
+    # Find common IDs using set intersection
+    cos_id_set = set(cos_ids)
+    pe_id_set = set(pe_ids)
+    common_ids = np.array(sorted(cos_id_set & pe_id_set))
+
+    if len(common_ids) == 0:
+        raise ValueError("No matching tax unit IDs between Cosilico and PolicyEngine")
+
+    # Create lookup dictionaries (O(n) construction, O(1) lookup)
+    cos_lookup = dict(zip(cos_ids, cos_values))
+    pe_lookup = dict(zip(pe_ids, pe_values))
+
+    # Vectorized value extraction
+    aligned_cos = np.array([cos_lookup[id_] for id_ in common_ids])
+    aligned_pe = np.array([pe_lookup[id_] for id_ in common_ids])
+
+    return aligned_cos, aligned_pe, common_ids
 
 
 def run_variable_comparison(
@@ -163,6 +208,8 @@ def run_variable_comparison(
 ) -> dict:
     """Run full comparison for a single variable.
 
+    Aligns records by tax_unit_id before comparing.
+
     Args:
         variable: Variable name to compare
         year: Tax year
@@ -171,12 +218,21 @@ def run_variable_comparison(
     Returns:
         Comparison result dict
     """
-    pe_values = load_pe_values(variable, year)
-    cosilico_values = load_cosilico_values(variable, year)
+    # Load with IDs for alignment
+    pe_values, pe_ids = load_pe_values(variable, year, return_ids=True)
+    cos_values, cos_ids = load_cosilico_values(variable, year, return_ids=True)
 
-    result = compare_records(cosilico_values, pe_values, tolerance=tolerance)
+    # Align records
+    aligned_cos, aligned_pe, matched_ids = align_records(
+        cos_values, cos_ids, pe_values, pe_ids
+    )
+
+    result = compare_records(aligned_cos, aligned_pe, tolerance=tolerance)
     result["variable"] = variable
     result["year"] = year
+    result["total_cosilico_records"] = len(cos_values)
+    result["total_pe_records"] = len(pe_values)
+    result["matched_records"] = len(matched_ids)
 
     return result
 

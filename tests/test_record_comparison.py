@@ -132,13 +132,15 @@ class TestCPSComparison:
 
         with patch("cosilico_validators.comparison.core.load_pe_values") as mock_pe:
             with patch("cosilico_validators.comparison.core.load_cosilico_values") as mock_cos:
-                mock_pe.return_value = np.array([100.0, 200.0, 300.0])
-                mock_cos.return_value = np.array([100.0, 200.0, 300.0])
+                # Return (values, ids) tuples since return_ids=True
+                mock_pe.return_value = (np.array([100.0, 200.0, 300.0]), np.array([1, 2, 3]))
+                mock_cos.return_value = (np.array([100.0, 200.0, 300.0]), np.array([1, 2, 3]))
 
                 result = run_variable_comparison("income_tax", year=2024)
 
                 assert result["variable"] == "income_tax"
                 assert result["match_rate"] == 1.0
+                assert result["matched_records"] == 3
 
 
 class TestComparisonDashboard:
