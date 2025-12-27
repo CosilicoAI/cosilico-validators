@@ -9,11 +9,26 @@ from .core import (
     run_variable_comparison,
 )
 
+from .aligned import (
+    CommonDataset,
+    ComparisonResult,
+    load_common_dataset,
+    compare_variable,
+    run_aligned_comparison,
+)
+
 __all__ = [
+    # Core comparison
     "compare_records",
     "load_pe_values",
     "load_cosilico_values",
     "run_variable_comparison",
     "run_full_comparison",
     "generate_dashboard_json",
+    # Aligned comparison (common dataset)
+    "CommonDataset",
+    "ComparisonResult",
+    "load_common_dataset",
+    "compare_variable",
+    "run_aligned_comparison",
 ]

@@ -305,6 +305,62 @@ Claude encoding confidence: {bug.get('claude_confidence', 'N/A')}
 
 @cli.command()
 @click.option("--year", "-y", default=2024, help="Tax year")
+@click.option("--output", "-o", type=click.Path(), help="Output JSON file for dashboard")
+def compare_aligned(year, output):
+    """Compare using common dataset (isolates rule differences).
+
+    Uses PolicyEngine's input data for both systems, ensuring identical
+    inputs so differences reflect only rule implementation.
+    """
+    from cosilico_validators.comparison import run_aligned_comparison
+
+    console.print(f"\n[bold]Aligned Comparison (Common Dataset)[/bold]")
+    console.print(f"Year: {year}")
+    console.print("Using PE inputs for both systems to isolate rule differences\n")
+
+    try:
+        dashboard = run_aligned_comparison(year=year)
+    except ImportError as e:
+        raise click.ClickException(str(e))
+
+    # Display summary
+    table = Table(title="Rules Alignment Results")
+    table.add_column("Variable", style="cyan")
+    table.add_column("Match Rate", justify="right")
+    table.add_column("MAE", justify="right")
+    table.add_column("Cosilico", justify="right")
+    table.add_column("PE", justify="right")
+    table.add_column("Diff", justify="right")
+
+    for var_result in dashboard["variables"]:
+        match_pct = var_result["match_rate"] * 100
+        match_color = "green" if match_pct > 90 else "yellow" if match_pct > 75 else "red"
+        diff_b = var_result["difference_billions"]
+        diff_color = "green" if abs(diff_b) < 10 else "yellow" if abs(diff_b) < 50 else "red"
+
+        table.add_row(
+            var_result["variable"],
+            f"[{match_color}]{match_pct:.1f}%[/{match_color}]",
+            f"${var_result['mean_absolute_error']:,.0f}",
+            f"${var_result['cosilico_weighted_total']/1e9:.1f}B",
+            f"${var_result['policyengine_weighted_total']/1e9:.1f}B",
+            f"[{diff_color}]{diff_b:+.1f}B[/{diff_color}]",
+        )
+
+    console.print(table)
+
+    summary = dashboard["summary"]
+    console.print(f"\n[bold]Overall:[/bold] {summary['overall_match_rate']*100:.1f}% match rate")
+    console.print(f"Records: {summary['total_records']:,}")
+
+    if output:
+        with open(output, "w") as f:
+            json.dump(dashboard, f, indent=2)
+        console.print(f"\n[green]Results saved to {output}[/green]")
+
+
+@cli.command()
+@click.option("--year", "-y", default=2024, help="Tax year")
 @click.option("--tolerance", "-t", default=1.0, help="Dollar tolerance for matching")
 @click.option("--variables", "-v", multiple=True, help="Variables to compare (default: eitc, income_tax, agi)")
 @click.option("--output", "-o", type=click.Path(), help="Output JSON file for dashboard")
