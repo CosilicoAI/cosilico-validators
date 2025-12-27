@@ -303,5 +303,67 @@ Claude encoding confidence: {bug.get('claude_confidence', 'N/A')}
         console.print("\n[yellow]Dry run - no issues were filed[/yellow]")
 
 
+@cli.command()
+@click.option("--year", "-y", default=2024, help="Tax year")
+@click.option("--tolerance", "-t", default=1.0, help="Dollar tolerance for matching")
+@click.option("--variables", "-v", multiple=True, help="Variables to compare (default: eitc, income_tax, agi)")
+@click.option("--output", "-o", type=click.Path(), help="Output JSON file for dashboard")
+def compare(year, tolerance, variables, output):
+    """Compare Cosilico vs PolicyEngine record-by-record on CPS data."""
+    from cosilico_validators.comparison import run_full_comparison
+
+    variables_list = list(variables) if variables else None
+
+    console.print(f"\n[bold]Cosilico vs PolicyEngine Record Comparison[/bold]")
+    console.print(f"Year: {year}, Tolerance: ${tolerance:.2f}\n")
+
+    try:
+        dashboard = run_full_comparison(
+            variables=variables_list,
+            year=year,
+            tolerance=tolerance,
+        )
+    except ImportError as e:
+        raise click.ClickException(str(e))
+
+    # Display summary
+    table = Table(title="Comparison Results")
+    table.add_column("Variable", style="cyan")
+    table.add_column("Match Rate", justify="right")
+    table.add_column("MAE", justify="right")
+    table.add_column("Records", justify="right")
+
+    for var_result in dashboard["variables"]:
+        if "error" in var_result:
+            table.add_row(
+                var_result["variable"],
+                "[red]ERROR[/red]",
+                "-",
+                "-",
+            )
+        else:
+            match_pct = var_result.get("match_rate", 0) * 100
+            match_color = "green" if match_pct > 90 else "yellow" if match_pct > 75 else "red"
+            table.add_row(
+                var_result["variable"],
+                f"[{match_color}]{match_pct:.1f}%[/{match_color}]",
+                f"${var_result.get('mean_absolute_error', 0):,.0f}",
+                f"{var_result.get('n_records', 0):,}",
+            )
+
+    console.print(table)
+
+    # Summary stats
+    summary = dashboard.get("summary", {})
+    console.print(f"\n[bold]Overall:[/bold] {summary.get('overall_match_rate', 0)*100:.1f}% match rate")
+    console.print(f"Total records: {summary.get('total_records', 0):,}")
+
+    # Save output
+    if output:
+        with open(output, "w") as f:
+            json.dump(dashboard, f, indent=2)
+        console.print(f"\n[green]Dashboard saved to {output}[/green]")
+
+
 if __name__ == "__main__":
     cli()

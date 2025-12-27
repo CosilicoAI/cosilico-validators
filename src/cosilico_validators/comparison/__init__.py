@@ -5,6 +5,7 @@ from .core import (
     generate_dashboard_json,
     load_cosilico_values,
     load_pe_values,
+    run_full_comparison,
     run_variable_comparison,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "load_pe_values",
     "load_cosilico_values",
     "run_variable_comparison",
+    "run_full_comparison",
     "generate_dashboard_json",
 ]

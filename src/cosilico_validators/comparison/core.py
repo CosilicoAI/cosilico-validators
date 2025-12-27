@@ -101,25 +101,59 @@ def load_pe_values(variable: str, year: int = 2024) -> np.ndarray:
 def load_cosilico_values(variable: str, year: int = 2024) -> np.ndarray:
     """Load Cosilico-computed values for a variable across CPS.
 
+    Uses the cosilico-data-sources runner infrastructure to compute values
+    using the same tax unit construction as PolicyEngine comparison.
+
     Args:
-        variable: Variable name (maps to Cosilico statute)
+        variable: Variable name (e.g., 'eitc', 'income_tax', 'ctc')
         year: Tax year
 
     Returns:
         Array of values for each tax unit
 
     Raises:
-        NotImplementedError: Until cosilico-engine is integrated
+        ImportError: If cosilico-data-sources not available
     """
-    # TODO: Integrate cosilico-engine when ready
-    # This requires:
-    # 1. Loading CPS input data (employment_income, filing_status, etc.)
-    # 2. Running Cosilico's income_tax calculation on each record
-    # 3. Returning the results as an array
-    raise NotImplementedError(
-        "Cosilico engine integration not yet complete. "
-        "Need to implement: load inputs from CPS, run Cosilico calculation, return array."
-    )
+    import sys
+    from pathlib import Path
+
+    # Add cosilico-data-sources to path
+    data_sources_path = Path.home() / "CosilicoAI" / "cosilico-data-sources" / "micro" / "us"
+    if not data_sources_path.exists():
+        raise ImportError(
+            f"cosilico-data-sources not found at {data_sources_path}. "
+            "Clone the repo to ~/CosilicoAI/cosilico-data-sources"
+        )
+    sys.path.insert(0, str(data_sources_path))
+
+    from tax_unit_builder import load_and_build_tax_units
+    from cosilico_runner import run_all_calculations
+
+    # Load and compute
+    df = load_and_build_tax_units(year)
+    df = run_all_calculations(df, year)
+
+    # Map variable names to cosilico column names
+    column_map = {
+        "eitc": "cos_eitc",
+        "ctc": "cos_ctc_total",
+        "non_refundable_ctc": "cos_ctc_nonref",
+        "refundable_ctc": "cos_ctc_ref",
+        "income_tax": "cos_income_tax",
+        "income_tax_before_credits": "cos_income_tax",
+        "self_employment_tax": "cos_se_tax",
+        "net_investment_income_tax": "cos_niit",
+        "adjusted_gross_income": "adjusted_gross_income",
+        "taxable_income": "taxable_income",
+    }
+
+    col = column_map.get(variable, f"cos_{variable}")
+    if col not in df.columns:
+        raise ValueError(
+            f"Variable '{variable}' not found. Available: {list(column_map.keys())}"
+        )
+
+    return np.array(df[col].values)
 
 
 def run_variable_comparison(
@@ -145,6 +179,47 @@ def run_variable_comparison(
     result["year"] = year
 
     return result
+
+
+def run_full_comparison(
+    variables: list[str] | None = None,
+    year: int = 2024,
+    tolerance: float = 1.0,
+) -> dict:
+    """Run comparison across all variables.
+
+    Args:
+        variables: List of variables to compare (default: common tax variables)
+        year: Tax year
+        tolerance: Match tolerance in dollars
+
+    Returns:
+        Dashboard-formatted comparison results
+    """
+    if variables is None:
+        variables = [
+            "eitc",
+            "income_tax_before_credits",
+            "adjusted_gross_income",
+        ]
+
+    results = []
+    for var in variables:
+        try:
+            result = run_variable_comparison(var, year, tolerance)
+            results.append(result)
+            print(f"  {var}: {result['match_rate']*100:.1f}% match rate")
+        except Exception as e:
+            print(f"  {var}: ERROR - {e}")
+            results.append({
+                "variable": var,
+                "year": year,
+                "error": str(e),
+                "match_rate": 0,
+                "n_records": 0,
+            })
+
+    return generate_dashboard_json(results, year)
 
 
 def generate_dashboard_json(results: list[dict], year: int = 2024) -> dict:

@@ -103,9 +103,28 @@ class TestCPSComparison:
         """Should load Cosilico-computed values for a variable across CPS."""
         from cosilico_validators.comparison import load_cosilico_values
 
-        # This will fail until cosilico-engine is integrated
-        with pytest.raises((ImportError, NotImplementedError)):
-            load_cosilico_values("income_tax", year=2024)
+        # Mock the cosilico-data-sources imports
+        with patch.dict("sys.modules", {
+            "tax_unit_builder": MagicMock(),
+            "cosilico_runner": MagicMock(),
+        }):
+            import sys
+            mock_builder = sys.modules["tax_unit_builder"]
+            mock_runner = sys.modules["cosilico_runner"]
+
+            # Setup mock DataFrame
+            mock_df = MagicMock()
+            mock_df.columns = ["cos_income_tax", "adjusted_gross_income"]
+            mock_df.__getitem__ = lambda self, key: MagicMock(values=np.array([100.0, 200.0, 300.0]))
+
+            mock_builder.load_and_build_tax_units.return_value = mock_df
+            mock_runner.run_all_calculations.return_value = mock_df
+
+            values = load_cosilico_values("income_tax", year=2024)
+
+            assert len(values) == 3
+            mock_builder.load_and_build_tax_units.assert_called_with(2024)
+            mock_runner.run_all_calculations.assert_called_with(mock_df, 2024)
 
     def test_run_comparison_for_variable(self):
         """Should run full comparison for a single variable."""
