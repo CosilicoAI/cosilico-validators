@@ -1,0 +1,46 @@
+{
+  "metadata": {
+    "generated_at": "2025-12-27T13:46:37.974103",
+    "tax_year": 2024,
+    "data_source": "CPS ASEC (Enhanced)"
+  },
+  "sources": {
+    "policyengine": {
+      "source": "PolicyEngine-US",
+      "version": "latest",
+      "computation_time_seconds": 8.693351984024048,
+      "aggregates": {
+        "total_income_tax": 1892203364352.0,
+        "total_income_tax_before_credits": 2058856955904.0,
+        "total_adjusted_gross_income": 14813169188864.0,
+        "total_eitc": 50075025408.0,
+        "total_ctc": 135310352384.0,
+        "total_snap": 92856745984.0,
+        "total_ssi": 67620126720.0,
+        "total_population": 143584512.0,
+        "tax_units_with_positive_tax": 106053616.0
+      },
+      "per_capita": {
+        "mean_income_tax": 13178.325001738349,
+        "mean_agi": 103166.9013776639
+      }
+    },
+    "taxsim": {
+      "source": "TAXSIM-35",
+      "version": "35",
+      "sample_size": 1000,
+      "note": "Not yet implemented - requires TAXSIM API integration",
+      "aggregates": {
+        "total_income_tax": null
+      }
+    }
+  },
+  "comparison": {
+    "baseline": "PolicyEngine-US",
+    "comparisons": []
+  },
+  "summary": {
+    "pe_total_income_tax_billions": 1892.203364352,
+    "pe_total_agi_trillions": 14.813169188864
+  }
+}
