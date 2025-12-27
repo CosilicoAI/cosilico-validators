@@ -22,6 +22,13 @@ VARIABLE_MAPPING = {
     "snap_benefits": "snap",
     "medicaid": "medicaid",
     "tanf": "tanf",
+    # Standard deduction
+    "standard_deduction": "standard_deduction",
+    "basic_standard_deduction": "basic_standard_deduction",
+    "additional_standard_deduction": "additional_standard_deduction",
+    # Adjusted gross income
+    "agi": "adjusted_gross_income",
+    "adjusted_gross_income": "adjusted_gross_income",
 }
 
 # Supported variables
