@@ -2,6 +2,9 @@
 
 Compares weighted totals from Cosilico's CPS calculations against
 PolicyEngine, TAXSIM, and other validators.
+
+Variable mappings are loaded from variable_mappings.yaml, which references
+statute definitions in cosilico-us (e.g., 26/32/eitc.rac::earned_income_tax_credit).
 """
 
 import sys
@@ -12,49 +15,43 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+import yaml
 
-# Variables to compare - maps variable names to column/variable names in each system
-# pe_entity specifies the entity level for aggregation (tax_unit is default)
-# tc_var is the Tax-Calculator output variable name
-COMPARISON_VARIABLES = {
-    "eitc": {
-        "cosilico_col": "cos_eitc",
-        "pe_var": "eitc",
-        "tc_var": "eitc",
-        "title": "Earned Income Tax Credit",
-    },
-    "ctc": {
-        "cosilico_col": "cos_ctc_total",
-        "pe_var": "ctc",
-        "tc_var": "c07220",  # CTC in Tax-Calculator
-        "title": "Child Tax Credit",
-    },
-    "ctc_refundable": {
-        "cosilico_col": "cos_ctc_ref",
-        "pe_var": "refundable_ctc",
-        "tc_var": "c11070",  # ACTC
-        "title": "Additional Child Tax Credit",
-    },
-    "income_tax": {
-        "cosilico_col": "cos_income_tax",
-        "pe_var": "income_tax_before_credits",
-        "tc_var": "c05800",  # Tax before credits
-        "title": "Income Tax (Before Credits)",
-    },
-    "se_tax": {
-        "cosilico_col": "cos_se_tax",
-        "pe_var": "self_employment_tax",
-        "pe_entity": "person",
-        "tc_var": "setax",  # Self-employment tax
-        "title": "Self-Employment Tax",
-    },
-    "niit": {
-        "cosilico_col": "cos_niit",
-        "pe_var": "net_investment_income_tax",
-        "tc_var": "niit",
-        "title": "Net Investment Income Tax",
-    },
-}
+
+def load_variable_mappings() -> dict[str, dict]:
+    """Load variable mappings from YAML file.
+
+    Returns:
+        Dict mapping variable names to their configurations, including:
+        - title: Human-readable name
+        - statute: Path to statute definition (e.g., 26/32/eitc.rac::earned_income_tax_credit)
+        - cosilico: Output column name in Cosilico results
+        - policyengine: Variable name in PolicyEngine
+        - taxcalc: Variable name in Tax-Calculator
+        - taxsim: Variable name in TAXSIM output
+    """
+    yaml_path = Path(__file__).parent / "variable_mappings.yaml"
+    with open(yaml_path) as f:
+        data = yaml.safe_load(f)
+
+    # Transform to internal format for backward compatibility
+    result = {}
+    for var_name, config in data.get("variables", {}).items():
+        result[var_name] = {
+            "title": config.get("title", var_name),
+            "statute": config.get("statute"),
+            "cosilico_col": config.get("cosilico"),
+            "pe_var": config.get("policyengine"),
+            "pe_entity": config.get("policyengine_entity", "tax_unit"),
+            "tc_var": config.get("taxcalc"),
+            "ts_var": config.get("taxsim"),
+            "derived": config.get("derived", False),
+        }
+    return result
+
+
+# Load mappings at module level
+COMPARISON_VARIABLES = load_variable_mappings()
 
 
 @dataclass
@@ -288,24 +285,16 @@ def load_taxsim_values(
     n_records = len(output_records)
     weights = df["weight"].values[:n_records]
 
-    # TAXSIM output variable mapping
-    # fiitax = federal income tax, v25 = EITC, v22 = CTC, actc = refundable CTC
-    taxsim_var_map = {
-        "eitc": "v25",
-        "ctc": "v22",
-        "ctc_refundable": "actc",
-        "income_tax": "fiitax",
-        "se_tax": "fica",  # FICA as proxy
-        "niit": "niit",
-    }
-
     if variables is None:
         variables = list(COMPARISON_VARIABLES.keys())
 
     data = {"weight": weights}
 
     for var_name in variables:
-        ts_var = taxsim_var_map.get(var_name)
+        if var_name not in COMPARISON_VARIABLES:
+            continue
+        config = COMPARISON_VARIABLES[var_name]
+        ts_var = config.get("ts_var")
         if ts_var and output_records and ts_var in output_records[0]:
             data[var_name] = np.array([float(r.get(ts_var, 0) or 0) for r in output_records])
         else:

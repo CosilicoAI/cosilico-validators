@@ -9,15 +9,15 @@ class TestComparisonTotals:
 
     def test_structure(self):
         """ComparisonTotals has required fields."""
-        from cosilico_validators.comparison.cps import ComparisonTotals
+        from cosilico_validators.comparison.cps import ComparisonTotals, ModelResult
 
         totals = ComparisonTotals(
             variable="eitc",
-            cosilico_total=60e9,
-            policyengine_total=62e9,
-            n_records=100000,
-            match_rate=0.85,
-            mean_absolute_error=150.0,
+            title="Earned Income Tax Credit",
+            models={
+                "cosilico": ModelResult("cosilico", 60e9, 100000, 100.0),
+                "policyengine": ModelResult("policyengine", 62e9, 100000, 200.0),
+            },
         )
 
         assert totals.variable == "eitc"
@@ -26,30 +26,30 @@ class TestComparisonTotals:
 
     def test_difference_property(self):
         """difference = cosilico - policyengine."""
-        from cosilico_validators.comparison.cps import ComparisonTotals
+        from cosilico_validators.comparison.cps import ComparisonTotals, ModelResult
 
         totals = ComparisonTotals(
             variable="test",
-            cosilico_total=100,
-            policyengine_total=80,
-            n_records=10,
-            match_rate=0.5,
-            mean_absolute_error=10,
+            title="Test Variable",
+            models={
+                "cosilico": ModelResult("cosilico", 100, 10, 50.0),
+                "policyengine": ModelResult("policyengine", 80, 10, 100.0),
+            },
         )
 
         assert totals.difference == 20
 
     def test_percent_difference_property(self):
         """percent_difference = (diff / pe) * 100."""
-        from cosilico_validators.comparison.cps import ComparisonTotals
+        from cosilico_validators.comparison.cps import ComparisonTotals, ModelResult
 
         totals = ComparisonTotals(
             variable="test",
-            cosilico_total=105,
-            policyengine_total=100,
-            n_records=10,
-            match_rate=0.5,
-            mean_absolute_error=5,
+            title="Test Variable",
+            models={
+                "cosilico": ModelResult("cosilico", 105, 10, 50.0),
+                "policyengine": ModelResult("policyengine", 100, 10, 100.0),
+            },
         )
 
         assert totals.percent_difference == 5.0
