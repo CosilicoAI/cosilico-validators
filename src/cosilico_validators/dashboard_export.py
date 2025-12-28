@@ -363,50 +363,51 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
             #   rental, social security, pension, unemployment, other income
             # Above-the-line deductions: educator expense, IRA, HSA, student loan interest,
             #   tip income (OBBBA), qualified overtime (OBBBA)
-            elif var_name == "adjusted_gross_income" and engine_available:
+            elif var_name == "adjusted_gross_income" and engine_available and dep_resolver:
                 try:
-                    # Load AGI formula from cosilico-us/statute/26/62/a.rac
-                    agi_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "62" / "a.rac"
-                    if agi_rac.exists():
-                        rac_code = agi_rac.read_text()
+                    # Build inputs from CommonDataset income fields
+                    # Map to .rac variable names from imports in 26/62/a.rac
+                    # Note: These are TaxUnit-level inputs (dataset.n_records)
+                    inputs = {
+                        # Gross income components (26 USC Section 61)
+                        # Names must match imports in 26/62/a.rac
+                        'wages': dataset.wages,
+                        'salaries': np.zeros(dataset.n_records),  # Combined in wages
+                        'tips': np.zeros(dataset.n_records),  # Combined in wages
+                        'self_employment_income': dataset.self_employment_income,
+                        'partnership_s_corp_income': dataset.partnership_s_corp_income,  # §61(a)(3) via §701
+                        'farm_income': dataset.farm_income,  # §61(a)(6)
+                        'interest_income': dataset.interest_income,  # §61(a)(4)
+                        'dividend_income': dataset.dividend_income,  # §61(a)(7)
+                        'capital_gains': dataset.capital_gains,  # §61(a)(3)
+                        'rental_income': dataset.rental_income,  # §61(a)(5)
+                        'taxable_social_security': dataset.taxable_social_security,  # §86
+                        'pension_income': dataset.pension_income,  # §61(a)(11)
+                        'taxable_unemployment': dataset.taxable_unemployment,  # §85
+                        'retirement_distributions': dataset.retirement_distributions,  # §402
+                        'miscellaneous_income': dataset.miscellaneous_income,  # §61(a) other
+                        # Above-the-line deductions (26 USC Section 62(a))
+                        'self_employment_tax_deduction': dataset.self_employment_tax_deduction,  # §62(a)(1)
+                        'self_employed_health_insurance_deduction': dataset.self_employed_health_insurance_deduction,  # §62(a)(1)
+                        'educator_expense_deduction': dataset.educator_expense_deduction,  # §62(a)(2)(D)
+                        'loss_deduction': dataset.loss_deduction,  # §62(a)(4)
+                        'self_employed_pension_deduction': dataset.self_employed_pension_deduction,  # §62(a)(6)
+                        'ira_deduction': dataset.ira_deduction,  # §62(a)(7)
+                        'hsa_deduction': dataset.hsa_deduction,  # §62(a)(12)
+                        'student_loan_interest_deduction': dataset.student_loan_interest_deduction,  # §62(a)(17)
+                        'tip_income_deduction': np.zeros(dataset.n_records),  # §62(a)(23) OBBBA temporary
+                        'qualified_overtime_deduction': np.zeros(dataset.n_records),  # §62(a)(24) OBBBA temporary
+                    }
 
-                        # Build inputs from CommonDataset income fields
-                        # Map to .rac variable names from imports in 26/62/a.rac
-                        inputs = {
-                            # Gross income components (26 USC Section 61)
-                            'wages': dataset.wages,
-                            'salaries': np.zeros(dataset.n_records),  # Combined in wages
-                            'tips': np.zeros(dataset.n_records),  # Combined in wages
-                            'self_employment_income': dataset.self_employment_income,
-                            'interest_income': dataset.interest_income,
-                            'dividend_income': dataset.dividend_income,
-                            'gains_from_property': dataset.capital_gains,
-                            'other_income': (
-                                dataset.rental_income +
-                                dataset.social_security +
-                                dataset.pension_income +
-                                dataset.other_income
-                            ),
-                            'unemployment_compensation': dataset.unemployment_compensation,
-                            # Above-the-line deductions (26 USC Section 62(a))
-                            # Not available in CommonDataset - set to zero for baseline
-                            'educator_expense_deduction': np.zeros(dataset.n_records),
-                            'ira_deduction': np.zeros(dataset.n_records),
-                            'hsa_deduction': np.zeros(dataset.n_records),
-                            'student_loan_interest_deduction': np.zeros(dataset.n_records),
-                            'tip_income_deduction': np.zeros(dataset.n_records),
-                            'qualified_overtime_deduction': np.zeros(dataset.n_records),
-                        }
-
-                        # Execute through engine
-                        executor = VectorizedExecutor()
-                        results_dict = executor.execute(
-                            code=rac_code,
-                            inputs=inputs,
-                            output_variables=['adjusted_gross_income']
-                        )
-                        cos_values = results_dict['adjusted_gross_income']
-                        implemented = True
+                    # Execute through engine with lazy dependency resolution
+                    executor = VectorizedExecutor(dependency_resolver=dep_resolver)
+                    results_dict = executor.execute_lazy(
+                        entry_point="statute/26/62/a",
+                        inputs=inputs,
+                        output_variables=['adjusted_gross_income']
+                    )
+                    cos_values = results_dict['adjusted_gross_income']
+                    implemented = True
                 except Exception as e:
                     print(f"    AGI engine failed: {e}")
                     implemented = False
