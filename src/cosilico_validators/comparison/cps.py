@@ -208,6 +208,114 @@ def load_policyengine_values(
     return TimedResult(data=result, elapsed_ms=elapsed)
 
 
+def load_taxsim_values(
+    year: int = 2024,
+    variables: Optional[list[str]] = None,
+) -> TimedResult:
+    """Load TAXSIM calculations by running local executable on CPS data.
+
+    Returns:
+        TimedResult with dict of arrays and elapsed time in ms.
+    """
+    import csv
+    import io
+    import subprocess
+
+    from cosilico_validators.comparison.multi_validator import get_taxsim_executable_path
+
+    start = time.perf_counter()
+
+    # Load Cosilico CPS data to get inputs
+    load_and_build_tax_units, _ = _load_cosilico_data_sources()
+    df = load_and_build_tax_units(year)
+
+    # Get TAXSIM executable
+    taxsim_path = get_taxsim_executable_path()
+
+    # Build TAXSIM input CSV - use minimal required fields
+    # TAXSIM input format: https://taxsim.nber.org/taxsim35/
+    lines = ["taxsimid,year,state,mstat,page,sage,depx,pwages,idtl"]
+
+    for i, row in df.iterrows():
+        # Map filing status: 1=single, 2=joint
+        mstat = 2 if row.get("is_joint", False) else 1
+
+        # Handle NaN values
+        def safe_int(val, default=0):
+            try:
+                if val is None or (isinstance(val, float) and np.isnan(val)):
+                    return default
+                return max(0, int(val))
+            except (ValueError, TypeError):
+                return default
+
+        def safe_float(val, default=0.0):
+            try:
+                if val is None or (isinstance(val, float) and np.isnan(val)):
+                    return default
+                return max(0.0, float(val))
+            except (ValueError, TypeError):
+                return default
+
+        page = safe_int(row.get("head_age", 35), 35)
+        page = max(1, page)  # Must be at least 1
+        sage = safe_int(row.get("spouse_age", 0)) if mstat == 2 else 0
+        depx = safe_int(row.get("num_eitc_children", 0))
+        pwages = safe_float(row.get("earned_income", 0))
+
+        lines.append(f"{i+1},{year},0,{mstat},{page},{sage},{depx},{pwages:.2f},2")
+
+    input_csv = "\n".join(lines)
+
+    # Run TAXSIM
+    result = subprocess.run(
+        [str(taxsim_path)],
+        input=input_csv,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"TAXSIM failed: {result.stderr}")
+
+    # Parse output
+    output_lines = result.stdout.strip().split("\n")
+    reader = csv.DictReader(output_lines)
+    output_records = list(reader)
+
+    # Extract values
+    n_records = len(output_records)
+    weights = df["weight"].values[:n_records]
+
+    # TAXSIM output variable mapping
+    # fiitax = federal income tax, v25 = EITC, v22 = CTC, actc = refundable CTC
+    taxsim_var_map = {
+        "eitc": "v25",
+        "ctc": "v22",
+        "ctc_refundable": "actc",
+        "income_tax": "fiitax",
+        "se_tax": "fica",  # FICA as proxy
+        "niit": "niit",
+    }
+
+    if variables is None:
+        variables = list(COMPARISON_VARIABLES.keys())
+
+    data = {"weight": weights}
+
+    for var_name in variables:
+        ts_var = taxsim_var_map.get(var_name)
+        if ts_var and output_records and ts_var in output_records[0]:
+            data[var_name] = np.array([float(r.get(ts_var, 0) or 0) for r in output_records])
+        else:
+            data[var_name] = np.zeros(n_records)
+
+    elapsed = (time.perf_counter() - start) * 1000
+
+    return TimedResult(data=data, elapsed_ms=elapsed)
+
+
 def load_taxcalc_values(
     year: int = 2024,
     variables: Optional[list[str]] = None,
@@ -272,7 +380,7 @@ def compare_cps_totals(
         variables = list(COMPARISON_VARIABLES.keys())
 
     if models is None:
-        models = ["cosilico", "policyengine", "taxcalc"]
+        models = ["cosilico", "policyengine", "taxcalc", "taxsim"]
 
     # Load data from each model
     model_results: dict[str, TimedResult] = {}
@@ -291,6 +399,12 @@ def compare_cps_totals(
             model_results["taxcalc"] = load_taxcalc_values(year, variables)
         except ImportError:
             pass  # Tax-Calculator not installed
+
+    if "taxsim" in models:
+        try:
+            model_results["taxsim"] = load_taxsim_values(year, variables)
+        except Exception as e:
+            print(f"Warning: TAXSIM failed: {e}")
 
     results = {}
 
