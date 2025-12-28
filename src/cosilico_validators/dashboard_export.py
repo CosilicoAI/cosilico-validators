@@ -22,23 +22,22 @@ from cosilico_validators.comparison.aligned import (
 
 
 # All PE tax variables we want to track, with section metadata
+# Keys must match PolicyEngine variable names exactly
 # Cosilico implementation is optional - unimplemented returns 0
 VARIABLES = {
     "eitc": {"section": "26/32", "title": "Earned Income Tax Credit", "implemented": True},
     "income_tax_before_credits": {"section": "26/1", "title": "Income Tax (Before Credits)", "implemented": True},
-    "ctc": {"section": "26/24", "title": "Child Tax Credit", "implemented": False},
-    "actc": {"section": "26/24", "title": "Additional Child Tax Credit", "implemented": False},
+    "ctc": {"section": "26/24", "title": "Child Tax Credit (Total)", "implemented": True},
+    "non_refundable_ctc": {"section": "26/24", "title": "Child Tax Credit (Non-refundable)", "implemented": True},
+    "refundable_ctc": {"section": "26/24", "title": "Additional Child Tax Credit", "implemented": True},
     "standard_deduction": {"section": "26/63", "title": "Standard Deduction", "implemented": True},
     "adjusted_gross_income": {"section": "26/62", "title": "Adjusted Gross Income", "implemented": False},
     "taxable_income": {"section": "26/63", "title": "Taxable Income", "implemented": False},
     "cdcc": {"section": "26/21", "title": "Child & Dependent Care Credit", "implemented": False},
-    "qbid": {"section": "26/199A", "title": "Qualified Business Income Deduction", "implemented": False},
     "salt_deduction": {"section": "26/164", "title": "SALT Deduction", "implemented": False},
-    "amt": {"section": "26/55", "title": "Alternative Minimum Tax", "implemented": False},
+    "alternative_minimum_tax": {"section": "26/55", "title": "Alternative Minimum Tax", "implemented": False},
     "premium_tax_credit": {"section": "26/36B", "title": "Premium Tax Credit", "implemented": False},
-    "savers_credit": {"section": "26/25B", "title": "Saver's Credit", "implemented": False},
-    "net_investment_income_tax": {"section": "26/1411", "title": "Net Investment Income Tax", "implemented": False},
-    "self_employment_tax": {"section": "26/1401", "title": "Self-Employment Tax", "implemented": False},
+    "net_investment_income_tax": {"section": "26/1411", "title": "Net Investment Income Tax", "implemented": True},
 }
 
 
@@ -100,7 +99,14 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
     # Load Cosilico implementations
     data_sources_path = Path.home() / "CosilicoAI" / "cosilico-data-sources" / "micro" / "us"
     sys.path.insert(0, str(data_sources_path))
-    from cosilico_runner import PARAMS_2024, calculate_eitc, calculate_income_tax, calculate_standard_deduction
+    from cosilico_runner import (
+        PARAMS_2024,
+        calculate_eitc,
+        calculate_income_tax,
+        calculate_standard_deduction,
+        calculate_ctc,
+        calculate_niit,
+    )
 
     # Get PE microsimulation
     print("Loading PolicyEngine calculations...")
@@ -148,6 +154,47 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
                     "earned_income": ds.earned_income,
                 })
                 return calculate_standard_deduction(df, PARAMS_2024)
+            return func
+
+        elif var_name in ("ctc", "non_refundable_ctc"):
+            def func(ds):
+                ctc_child_count = np.array(sim.calculate("ctc_qualifying_children", year))
+                # Other dependents not in ctc_qualifying_children
+                other_dep = np.zeros(ds.n_records)
+                df = pd.DataFrame({
+                    "num_ctc_children": ctc_child_count,
+                    "num_other_dependents": other_dep,
+                    "is_joint": ds.is_joint,
+                    "adjusted_gross_income": ds.adjusted_gross_income,
+                    "earned_income": ds.earned_income,
+                })
+                nonref, refund = calculate_ctc(df, PARAMS_2024)
+                return nonref + refund if var_name == "ctc" else nonref
+            return func
+
+        elif var_name == "refundable_ctc":
+            def func(ds):
+                ctc_child_count = np.array(sim.calculate("ctc_qualifying_children", year))
+                other_dep = np.zeros(ds.n_records)
+                df = pd.DataFrame({
+                    "num_ctc_children": ctc_child_count,
+                    "num_other_dependents": other_dep,
+                    "is_joint": ds.is_joint,
+                    "adjusted_gross_income": ds.adjusted_gross_income,
+                    "earned_income": ds.earned_income,
+                })
+                _, refund = calculate_ctc(df, PARAMS_2024)
+                return refund
+            return func
+
+        elif var_name == "net_investment_income_tax":
+            def func(ds):
+                df = pd.DataFrame({
+                    "is_joint": ds.is_joint,
+                    "adjusted_gross_income": ds.adjusted_gross_income,
+                    "investment_income": ds.investment_income,
+                })
+                return calculate_niit(df, PARAMS_2024)
             return func
 
         else:
