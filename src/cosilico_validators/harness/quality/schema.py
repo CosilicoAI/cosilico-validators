@@ -14,14 +14,22 @@ from .. import QualityIssue
 
 
 # Valid values for schema fields
-VALID_ENTITIES = {"Person", "TaxUnit", "Household", "Family", "TanfUnit", "SnapUnit"}
+VALID_ENTITIES = {
+    # Core tax/benefit units
+    "Person", "TaxUnit", "Household", "Family",
+    # Benefit program units
+    "TanfUnit", "SnapUnit", "SPMUnit",
+    # Business/asset entities (for corporate/capital gains)
+    "Corporation", "Business", "Asset",
+}
 VALID_PERIODS = {"Year", "Month", "Week", "Day"}
-VALID_DTYPES = {"Money", "Rate", "Boolean", "Integer", "Count", "String"}
+VALID_DTYPES = {"Money", "Rate", "Boolean", "Integer", "Count", "String", "Decimal"}
 ALLOWED_INTEGERS = {-1, 0, 1, 2, 3}
 
 # Regex patterns
 ENTITY_PATTERN = re.compile(r"^\s*entity:\s*(\w+)")
-PERIOD_PATTERN = re.compile(r"^\s*period:\s*(\w+)")
+# Period type declarations only - exclude date-like values (2024-01, etc.)
+PERIOD_PATTERN = re.compile(r"^\s*period:\s*(Year|Month|Week|Day|[A-Z][a-z]+)$")
 DTYPE_PATTERN = re.compile(r"^\s*dtype:\s*(\w+)")
 FORMULA_START = re.compile(r"^\s*formula:\s*\|")
 FORMULA_LINE = re.compile(r"^\s{4,}")  # Indented lines in formula
