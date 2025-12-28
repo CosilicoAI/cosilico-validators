@@ -13,31 +13,91 @@ from typing import Optional
 
 import numpy as np
 
-# Variables to compare - maps Cosilico column names to PolicyEngine variable names
+# Variables to compare - maps variable names to column/variable names in each system
 # pe_entity specifies the entity level for aggregation (tax_unit is default)
+# tc_var is the Tax-Calculator output variable name
 COMPARISON_VARIABLES = {
-    "eitc": {"cosilico_col": "cos_eitc", "pe_var": "eitc", "title": "Earned Income Tax Credit"},
-    "ctc": {"cosilico_col": "cos_ctc_total", "pe_var": "ctc", "title": "Child Tax Credit"},
-    "ctc_refundable": {"cosilico_col": "cos_ctc_ref", "pe_var": "refundable_ctc", "title": "Additional Child Tax Credit"},
-    "income_tax": {"cosilico_col": "cos_income_tax", "pe_var": "income_tax_before_credits", "title": "Income Tax (Before Credits)"},
-    "se_tax": {"cosilico_col": "cos_se_tax", "pe_var": "self_employment_tax", "pe_entity": "person", "title": "Self-Employment Tax"},
-    "niit": {"cosilico_col": "cos_niit", "pe_var": "net_investment_income_tax", "title": "Net Investment Income Tax"},
+    "eitc": {
+        "cosilico_col": "cos_eitc",
+        "pe_var": "eitc",
+        "tc_var": "eitc",
+        "title": "Earned Income Tax Credit",
+    },
+    "ctc": {
+        "cosilico_col": "cos_ctc_total",
+        "pe_var": "ctc",
+        "tc_var": "c07220",  # CTC in Tax-Calculator
+        "title": "Child Tax Credit",
+    },
+    "ctc_refundable": {
+        "cosilico_col": "cos_ctc_ref",
+        "pe_var": "refundable_ctc",
+        "tc_var": "c11070",  # ACTC
+        "title": "Additional Child Tax Credit",
+    },
+    "income_tax": {
+        "cosilico_col": "cos_income_tax",
+        "pe_var": "income_tax_before_credits",
+        "tc_var": "c05800",  # Tax before credits
+        "title": "Income Tax (Before Credits)",
+    },
+    "se_tax": {
+        "cosilico_col": "cos_se_tax",
+        "pe_var": "self_employment_tax",
+        "pe_entity": "person",
+        "tc_var": "setax",  # Self-employment tax
+        "title": "Self-Employment Tax",
+    },
+    "niit": {
+        "cosilico_col": "cos_niit",
+        "pe_var": "net_investment_income_tax",
+        "tc_var": "niit",
+        "title": "Net Investment Income Tax",
+    },
 }
 
 
 @dataclass
+class ModelResult:
+    """Result from a single model."""
+    name: str
+    total: float
+    n_records: int
+    time_ms: float
+
+
+@dataclass
 class ComparisonTotals:
-    """Comparison result for a single variable."""
+    """Comparison result for a single variable across all models."""
 
     variable: str
-    cosilico_total: float
-    policyengine_total: float
-    n_records: int
-    match_rate: float  # Within $1 tolerance
-    mean_absolute_error: float
-    title: str = ""
-    cosilico_time_ms: float = 0.0
-    policyengine_time_ms: float = 0.0
+    title: str
+    models: dict[str, ModelResult]  # model_name -> result
+
+    def get_total(self, model: str) -> float:
+        """Get total for a specific model."""
+        return self.models.get(model, ModelResult(model, 0.0, 0, 0.0)).total
+
+    @property
+    def cosilico_total(self) -> float:
+        return self.get_total("cosilico")
+
+    @property
+    def policyengine_total(self) -> float:
+        return self.get_total("policyengine")
+
+    @property
+    def taxcalc_total(self) -> float:
+        return self.get_total("taxcalc")
+
+    @property
+    def n_records(self) -> int:
+        """Max records across models."""
+        return max((m.n_records for m in self.models.values()), default=0)
+
+    # Legacy properties for backward compatibility
+    match_rate: float = 0.0
+    mean_absolute_error: float = 0.0
 
     @property
     def difference(self) -> float:
@@ -148,17 +208,62 @@ def load_policyengine_values(
     return TimedResult(data=result, elapsed_ms=elapsed)
 
 
+def load_taxcalc_values(
+    year: int = 2024,
+    variables: Optional[list[str]] = None,
+) -> TimedResult:
+    """Load Tax-Calculator calculations from its built-in CPS.
+
+    Returns:
+        TimedResult with dict of arrays and elapsed time in ms.
+    """
+    from taxcalc import Calculator, Policy, Records
+
+    start = time.perf_counter()
+
+    # Create calculator with CPS data
+    rec = Records.cps_constructor()
+    pol = Policy()
+    calc = Calculator(policy=pol, records=rec)
+    calc.advance_to_year(year)
+    calc.calc_all()
+
+    if variables is None:
+        variables = list(COMPARISON_VARIABLES.keys())
+
+    result = {"weight": calc.array("s006")}
+
+    for var_name in variables:
+        if var_name not in COMPARISON_VARIABLES:
+            continue
+        config = COMPARISON_VARIABLES[var_name]
+        tc_var = config.get("tc_var")
+        if tc_var:
+            try:
+                result[var_name] = calc.array(tc_var)
+            except Exception:
+                result[var_name] = np.zeros_like(result["weight"])
+        else:
+            result[var_name] = np.zeros_like(result["weight"])
+
+    elapsed = (time.perf_counter() - start) * 1000
+
+    return TimedResult(data=result, elapsed_ms=elapsed)
+
+
 def compare_cps_totals(
     year: int = 2024,
     variables: Optional[list[str]] = None,
     tolerance: float = 1.0,
+    models: Optional[list[str]] = None,
 ) -> dict[str, ComparisonTotals]:
-    """Compare Cosilico CPS totals against PolicyEngine.
+    """Compare Cosilico CPS totals against multiple models.
 
     Args:
         year: Tax year
         variables: List of variables to compare (default: all)
         tolerance: Match tolerance in dollars
+        models: List of models to include (default: all available)
 
     Returns:
         Dict mapping variable names to ComparisonTotals.
@@ -166,12 +271,26 @@ def compare_cps_totals(
     if variables is None:
         variables = list(COMPARISON_VARIABLES.keys())
 
-    # Load both sets of values with timing
-    cos_result = load_cosilico_cps(year)
-    pe_result = load_policyengine_values(year, variables)
+    if models is None:
+        models = ["cosilico", "policyengine", "taxcalc"]
 
-    cos_data = cos_result.data
-    pe_data = pe_result.data
+    # Load data from each model
+    model_results: dict[str, TimedResult] = {}
+
+    if "cosilico" in models:
+        model_results["cosilico"] = load_cosilico_cps(year)
+
+    if "policyengine" in models:
+        try:
+            model_results["policyengine"] = load_policyengine_values(year, variables)
+        except ImportError:
+            pass  # PolicyEngine not installed
+
+    if "taxcalc" in models:
+        try:
+            model_results["taxcalc"] = load_taxcalc_values(year, variables)
+        except ImportError:
+            pass  # Tax-Calculator not installed
 
     results = {}
 
@@ -180,38 +299,25 @@ def compare_cps_totals(
             continue
 
         config = COMPARISON_VARIABLES[var_name]
-        cos_values = cos_data.get(var_name, np.zeros_like(cos_data["weight"]))
-        pe_values = pe_data.get(var_name, np.zeros_like(pe_data["weight"]))
-        cos_weights = cos_data["weight"]
-        pe_weights = pe_data["weight"]
+        var_models = {}
 
-        # Weighted totals (can compare even with different record counts)
-        cos_total = (cos_values * cos_weights).sum()
-        pe_total = (pe_values * pe_weights).sum()
+        for model_name, timed_result in model_results.items():
+            data = timed_result.data
+            values = data.get(var_name, np.zeros_like(data["weight"]))
+            weights = data["weight"]
+            total = float((values * weights).sum())
 
-        # Match rate only possible if same length (same microdata)
-        # If different lengths, we can only compare totals
-        if len(cos_values) == len(pe_values):
-            diff = np.abs(cos_values - pe_values)
-            match_rate = (diff <= tolerance).mean()
-            mae = diff.mean()
-        else:
-            # Different microdata sources - can't do unit-level comparison
-            match_rate = np.nan
-            mae = np.nan
-
-        n_records = max(len(cos_values), len(pe_values))
+            var_models[model_name] = ModelResult(
+                name=model_name,
+                total=total,
+                n_records=len(values),
+                time_ms=timed_result.elapsed_ms,
+            )
 
         results[var_name] = ComparisonTotals(
             variable=var_name,
-            cosilico_total=float(cos_total),
-            policyengine_total=float(pe_total),
-            n_records=n_records,
-            match_rate=float(match_rate) if not np.isnan(match_rate) else 0.0,
-            mean_absolute_error=float(mae) if not np.isnan(mae) else 0.0,
             title=config["title"],
-            cosilico_time_ms=cos_result.elapsed_ms,
-            policyengine_time_ms=pe_result.elapsed_ms,
+            models=var_models,
         )
 
     return results
@@ -264,51 +370,58 @@ def export_to_dashboard(
 
 
 def generate_report(year: int = 2024) -> str:
-    """Generate a text report comparing Cosilico vs PolicyEngine."""
+    """Generate a text report comparing all models."""
     comparison = compare_cps_totals(year)
 
-    # Get timing from first result
+    # Get all model names from first result
     first_result = next(iter(comparison.values()))
-    cos_time = first_result.cosilico_time_ms
-    pe_time = first_result.policyengine_time_ms
+    model_names = list(first_result.models.keys())
+
+    # Build header
+    header_parts = [f"{'Variable':<25}"]
+    for model in model_names:
+        header_parts.append(f"{model:>14}")
+    header = " ".join(header_parts)
 
     lines = [
-        "=" * 80,
-        f"Cosilico vs PolicyEngine: CPS Weighted Totals ({year})",
-        "=" * 80,
+        "=" * 100,
+        f"CPS Weighted Totals Comparison ({year})",
+        "=" * 100,
         "",
-        f"{'Variable':<25} {'Cosilico':>12} {'PolicyEngine':>12} {'Diff':>12} {'%':>8}",
-        "-" * 80,
+        header,
+        "-" * 100,
     ]
 
     for var_name, totals in comparison.items():
-        cos_b = totals.cosilico_total / 1e9
-        pe_b = totals.policyengine_total / 1e9
-        diff_b = totals.difference / 1e9
-        pct = totals.percent_difference
-
-        lines.append(
-            f"{totals.title:<25} ${cos_b:>10.1f}B ${pe_b:>10.1f}B ${diff_b:>+10.1f}B {pct:>+7.1f}%"
-        )
+        row_parts = [f"{totals.title:<25}"]
+        for model in model_names:
+            val = totals.get_total(model) / 1e9
+            row_parts.append(f"${val:>12.1f}B")
+        lines.append(" ".join(row_parts))
 
     lines.extend([
-        "-" * 80,
+        "-" * 100,
         "",
-        "Match Rate (within $1):",
+        "Records per model:",
     ])
 
-    for var_name, totals in comparison.items():
-        lines.append(f"  {totals.title}: {totals.match_rate*100:.1f}%")
+    for model in model_names:
+        n = first_result.models[model].n_records
+        lines.append(f"  {model}: {n:,}")
 
     lines.extend([
         "",
-        "-" * 80,
-        "Performance:",
-        f"  Cosilico:     {cos_time:>10,.0f} ms ({cos_time/1000:.1f}s)",
-        f"  PolicyEngine: {pe_time:>10,.0f} ms ({pe_time/1000:.1f}s)",
-        f"  Speedup:      {pe_time/cos_time:>10.1f}x" if cos_time > 0 else "  Speedup:      N/A",
+        "-" * 100,
+        "Performance (ms):",
+    ])
+
+    for model in model_names:
+        ms = first_result.models[model].time_ms
+        lines.append(f"  {model}: {ms:,.0f} ms ({ms/1000:.1f}s)")
+
+    lines.extend([
         "",
-        "=" * 80,
+        "=" * 100,
     ])
 
     return "\n".join(lines)
