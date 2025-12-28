@@ -35,18 +35,18 @@ FORMULA_START = re.compile(r"^\s*formula:\s*\|")
 FORMULA_LINE = re.compile(r"^\s{4,}")  # Indented lines in formula
 
 # Pattern to find literals in formulas
-# Matches integers > 3 or any float
+# Matches integers > 3 or any float (but not digits within larger numbers)
 LITERAL_PATTERN = re.compile(
     r"""
-    (?<![a-zA-Z_])  # Not preceded by identifier char
+    (?<![a-zA-Z_\d])  # Not preceded by identifier char or digit
     (
-        \d+\.\d+    # Float like 0.075
+        \d+\.\d+      # Float like 0.075
         |
-        [4-9]\d*    # Integer 4+
+        [4-9]         # Single digit 4-9
         |
-        [1-9]\d{1,} # Integer 10+
+        [1-9]\d+      # Multi-digit starting with 1-9 (10+)
     )
-    (?![a-zA-Z_])   # Not followed by identifier char
+    (?![a-zA-Z_\d])   # Not followed by identifier char or digit
     """,
     re.VERBOSE,
 )
@@ -145,9 +145,10 @@ def check_schema(rac_files: list[Path]) -> tuple[list[QualityIssue], bool, bool]
 
                 for match in LITERAL_PATTERN.finditer(code_line):
                     literal = match.group(1)
-                    # Check if it's an allowed integer
+                    # Check if it's an allowed value (integers -1,0,1,2,3 or their float equivalents)
                     try:
-                        if "." not in literal and int(literal) in ALLOWED_INTEGERS:
+                        val = float(literal)
+                        if val in {-1.0, 0.0, 1.0, 2.0, 3.0}:
                             continue
                     except ValueError:
                         pass
