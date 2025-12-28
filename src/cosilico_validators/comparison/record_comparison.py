@@ -164,15 +164,36 @@ def _create_pe_situation(row: pd.Series, year: int) -> dict:
             "age": {str(year): spouse_age if spouse_age > 0 else 40},
         }
 
-    # Dependents - assume children for EITC/CTC
+    # Dependents - use CPS counts for EITC/CTC qualifying children
     n_eitc_children = _safe_int(row.get("num_eitc_children"))
     n_ctc_children = _safe_int(row.get("num_ctc_children"))
+    n_other_deps = _safe_int(row.get("num_other_dependents", 0))
 
-    for i in range(n_deps):
+    # EITC-qualifying children (under 19, or under 24 if student)
+    for i in range(n_eitc_children):
         dep_name = f"dep{i+1}"
-        # Assume children are young enough for EITC/CTC
         people[dep_name] = {
-            "age": {str(year): 10},  # Young child
+            "age": {str(year): 10},  # Young child - qualifies for EITC
+            "is_tax_unit_dependent": {str(year): True},
+        }
+
+    # CTC-only children (under 17 but possibly not EITC qualifying)
+    # These are rare - usually EITC children >= CTC children
+    ctc_only = max(0, n_ctc_children - n_eitc_children)
+    for i in range(ctc_only):
+        dep_name = f"dep{n_eitc_children + i + 1}"
+        people[dep_name] = {
+            "age": {str(year): 10},  # Young child for CTC
+            "is_tax_unit_dependent": {str(year): True},
+        }
+
+    # Other dependents (19+, don't qualify for EITC/CTC child credit)
+    # These get the $500 other dependent credit
+    other_deps_count = n_deps - n_eitc_children - ctc_only
+    for i in range(max(0, other_deps_count)):
+        dep_name = f"dep{n_eitc_children + ctc_only + i + 1}"
+        people[dep_name] = {
+            "age": {str(year): 20},  # Adult dependent - no EITC, $500 ODC only
             "is_tax_unit_dependent": {str(year): True},
         }
 
