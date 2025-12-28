@@ -21,26 +21,39 @@ import yaml
 def load_variable_mappings() -> dict[str, dict]:
     """Load variable mappings from YAML file.
 
+    The statute field is the source of truth for Cosilico variables.
+    Format: {title}/{section}/{file}.rac::{formula_name}
+    The formula_name after :: is used as the output column name.
+
     Returns:
         Dict mapping variable names to their configurations, including:
         - title: Human-readable name
         - statute: Path to statute definition (e.g., 26/32/eitc.rac::earned_income_tax_credit)
-        - cosilico: Output column name in Cosilico results
-        - policyengine: Variable name in PolicyEngine
-        - taxcalc: Variable name in Tax-Calculator
-        - taxsim: Variable name in TAXSIM output
+        - cosilico_col: Derived from statute (the formula name after ::)
+        - pe_var: Variable name in PolicyEngine
+        - tc_var: Variable name in Tax-Calculator
+        - ts_var: Variable name in TAXSIM output
     """
     yaml_path = Path(__file__).parent / "variable_mappings.yaml"
     with open(yaml_path) as f:
         data = yaml.safe_load(f)
 
-    # Transform to internal format for backward compatibility
     result = {}
     for var_name, config in data.get("variables", {}).items():
+        statute = config.get("statute", "")
+
+        # Use cosilico_override if present, otherwise derive from statute
+        if config.get("cosilico_override"):
+            cosilico_col = config["cosilico_override"]
+        elif "::" in statute:
+            cosilico_col = statute.split("::")[-1]
+        else:
+            cosilico_col = var_name
+
         result[var_name] = {
             "title": config.get("title", var_name),
-            "statute": config.get("statute"),
-            "cosilico_col": config.get("cosilico"),
+            "statute": statute,
+            "cosilico_col": cosilico_col,
             "pe_var": config.get("policyengine"),
             "pe_entity": config.get("policyengine_entity", "tax_unit"),
             "tc_var": config.get("taxcalc"),
