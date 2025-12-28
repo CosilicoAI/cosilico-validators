@@ -3,6 +3,35 @@
 Usage:
     python -m cosilico_validators.dashboard_export -o validation-results.json
     cp validation-results.json /path/to/cosilico.ai/public/data/
+
+################################################################################
+#                                                                              #
+#   ██████  ██████  ██ ████████ ██  ██████  █████  ██                          #
+#  ██      ██   ██  ██    ██    ██ ██      ██   ██ ██                          #
+#  ██      ██████   ██    ██    ██ ██      ███████ ██                          #
+#  ██      ██   ██  ██    ██    ██ ██      ██   ██ ██                          #
+#   ██████ ██   ██  ██    ██    ██  ██████ ██   ██ ███████                     #
+#                                                                              #
+#   THIS FILE IS A VALIDATOR ONLY - NO TAX RULES ALLOWED HERE!                 #
+#                                                                              #
+#   ALL TAX CALCULATION LOGIC MUST COME FROM:                                  #
+#     - cosilico-us/*.rac files (statute encodings)                            #
+#     - cosilico-engine (DSL executor)                                         #
+#                                                                              #
+#   This validator ONLY:                                                       #
+#     1. Loads outputs from Cosilico engine                                    #
+#     2. Loads outputs from external validators (PE, TAXSIM, etc)              #
+#     3. Compares them                                                         #
+#                                                                              #
+#   DO NOT ADD:                                                                #
+#     - Filing status logic                                                    #
+#     - Age-based calculations                                                 #
+#     - Income aggregations                                                    #
+#     - ANY tax rule implementations                                           #
+#                                                                              #
+#   If validation fails, FIX THE .RAC FILES, not this validator!               #
+#                                                                              #
+################################################################################
 """
 
 import json
