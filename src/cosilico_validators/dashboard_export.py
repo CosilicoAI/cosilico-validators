@@ -28,7 +28,7 @@ VARIABLES = {
     "income_tax_before_credits": {"section": "26/1", "title": "Income Tax (Before Credits)", "implemented": True},
     "ctc": {"section": "26/24", "title": "Child Tax Credit", "implemented": False},
     "actc": {"section": "26/24", "title": "Additional Child Tax Credit", "implemented": False},
-    "standard_deduction": {"section": "26/63", "title": "Standard Deduction", "implemented": False},
+    "standard_deduction": {"section": "26/63", "title": "Standard Deduction", "implemented": True},
     "adjusted_gross_income": {"section": "26/62", "title": "Adjusted Gross Income", "implemented": False},
     "taxable_income": {"section": "26/63", "title": "Taxable Income", "implemented": False},
     "cdcc": {"section": "26/21", "title": "Child & Dependent Care Credit", "implemented": False},
@@ -100,7 +100,7 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
     # Load Cosilico implementations
     data_sources_path = Path.home() / "CosilicoAI" / "cosilico-data-sources" / "micro" / "us"
     sys.path.insert(0, str(data_sources_path))
-    from cosilico_runner import PARAMS_2024, calculate_eitc, calculate_income_tax
+    from cosilico_runner import PARAMS_2024, calculate_eitc, calculate_income_tax, calculate_standard_deduction
 
     # Get PE microsimulation
     print("Loading PolicyEngine calculations...")
@@ -130,6 +130,24 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
                     "is_joint": ds.is_joint,
                 })
                 return calculate_income_tax(df, PARAMS_2024)
+            return func
+
+        elif var_name == "standard_deduction":
+            def func(ds):
+                # filing_status: SINGLE=0, JOINT=1, SEPARATE=2, HEAD_OF_HOUSEHOLD=3, WIDOW=4
+                filing_status = np.array(sim.calculate("filing_status", year))
+                age_head = np.array(sim.calculate("age_head", year))
+                df = pd.DataFrame({
+                    "is_joint": filing_status == 1,  # JOINT
+                    "is_head_of_household": filing_status == 3,  # HEAD_OF_HOUSEHOLD
+                    "age_head": age_head,
+                    "age_spouse": np.where(filing_status == 1, age_head, 0),  # Approximate: same as head for joint
+                    "is_blind_head": np.zeros(ds.n_records, dtype=bool),  # PE doesn't track blind status
+                    "is_blind_spouse": np.zeros(ds.n_records, dtype=bool),
+                    "is_dependent": np.zeros(ds.n_records, dtype=bool),
+                    "earned_income": ds.earned_income,
+                })
+                return calculate_standard_deduction(df, PARAMS_2024)
             return func
 
         else:
