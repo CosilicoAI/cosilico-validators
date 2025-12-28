@@ -140,15 +140,18 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
 
         elif var_name == "standard_deduction":
             def func(ds):
-                # filing_status: SINGLE=0, JOINT=1, SEPARATE=2, HEAD_OF_HOUSEHOLD=3, WIDOW=4
-                filing_status = np.array(sim.calculate("filing_status", year))
+                # filing_status is a string enum: SINGLE, JOINT, SEPARATE, HEAD_OF_HOUSEHOLD, WIDOW
+                filing_status = sim.calculate("filing_status", year)
                 age_head = np.array(sim.calculate("age_head", year))
+                age_spouse = np.array(sim.calculate("age_spouse", year))
+                is_joint = np.array([str(fs) == "JOINT" for fs in filing_status])
+                is_hoh = np.array([str(fs) == "HEAD_OF_HOUSEHOLD" for fs in filing_status])
                 df = pd.DataFrame({
-                    "is_joint": filing_status == 1,  # JOINT
-                    "is_head_of_household": filing_status == 3,  # HEAD_OF_HOUSEHOLD
+                    "is_joint": is_joint,
+                    "is_head_of_household": is_hoh,
                     "age_head": age_head,
-                    "age_spouse": np.where(filing_status == 1, age_head, 0),  # Approximate: same as head for joint
-                    "is_blind_head": np.zeros(ds.n_records, dtype=bool),  # PE doesn't track blind status
+                    "age_spouse": age_spouse,
+                    "is_blind_head": np.zeros(ds.n_records, dtype=bool),
                     "is_blind_spouse": np.zeros(ds.n_records, dtype=bool),
                     "is_dependent": np.zeros(ds.n_records, dtype=bool),
                     "earned_income": ds.earned_income,
