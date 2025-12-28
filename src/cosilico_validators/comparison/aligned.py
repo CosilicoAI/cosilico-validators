@@ -25,6 +25,7 @@ class CommonDataset:
 
     # Filing status
     is_joint: np.ndarray
+    filing_status: np.ndarray  # String array: SINGLE, JOINT, HEAD_OF_HOUSEHOLD, etc.
 
     # Income components
     earned_income: np.ndarray
@@ -52,6 +53,15 @@ class CommonDataset:
     head_age: np.ndarray
     spouse_age: np.ndarray
 
+    # Standard deduction inputs (from 26 USC 63)
+    head_is_blind: np.ndarray
+    spouse_is_blind: np.ndarray
+    head_is_dependent: np.ndarray  # Tax filer claimed as dependent on another return
+
+    # CDCC inputs (from 26 USC 21)
+    cdcc_qualifying_individuals: np.ndarray  # Count of qualifying individuals (children <13 or disabled)
+    childcare_expenses: np.ndarray  # Employment-related care expenses paid during year
+
     @property
     def n_records(self) -> int:
         return len(self.tax_unit_id)
@@ -71,23 +81,65 @@ def load_common_dataset(year: int = 2024) -> CommonDataset:
     def calc(var):
         return np.array(sim.calculate(var, year))
 
+    # Get tax_unit-level arrays first
+    tax_unit_id = calc("tax_unit_id")
+    n_tax_units = len(tax_unit_id)
+
+    # Get filing_status as string array
+    filing_status_raw = sim.calculate("filing_status", year)
+    filing_status = np.array(filing_status_raw)
+
+    # Get age at tax_unit level (directly available)
+    head_age = calc("age_head")
+    spouse_age = calc("age_spouse")
+
+    # Aggregate person-level blind status to tax_unit level
+    # Need to map from person to tax_unit
+    is_blind_person = calc("is_blind")
+    is_tax_unit_head = calc("is_tax_unit_head")
+    is_tax_unit_spouse = calc("is_tax_unit_spouse")
+    person_tax_unit_id = calc("person_tax_unit_id")
+
+    # Create mapping from tax_unit_id to index
+    tu_id_to_idx = {tid: idx for idx, tid in enumerate(tax_unit_id)}
+
+    # Initialize tax_unit-level blind arrays
+    head_is_blind = np.zeros(n_tax_units, dtype=bool)
+    spouse_is_blind = np.zeros(n_tax_units, dtype=bool)
+    head_is_dependent = np.zeros(n_tax_units, dtype=bool)
+
+    # Aggregate person-level to tax_unit-level
+    is_tax_unit_dependent = calc("is_tax_unit_dependent")
+    for i in range(len(person_tax_unit_id)):
+        ptu_id = person_tax_unit_id[i]
+        if ptu_id in tu_id_to_idx:
+            tu_idx = tu_id_to_idx[ptu_id]
+            if is_tax_unit_head[i]:
+                if is_blind_person[i]:
+                    head_is_blind[tu_idx] = True
+                if is_tax_unit_dependent[i]:
+                    head_is_dependent[tu_idx] = True
+            if is_tax_unit_spouse[i] and is_blind_person[i]:
+                spouse_is_blind[tu_idx] = True
+
     return CommonDataset(
-        tax_unit_id=calc("tax_unit_id"),
+        tax_unit_id=tax_unit_id,
         weight=calc("tax_unit_weight"),
         is_joint=calc("tax_unit_is_joint"),
+        filing_status=filing_status,
 
         # Income
         earned_income=calc("tax_unit_earned_income"),
         wages=calc("tax_unit_earned_income"),  # Simplified - PE combines wages
-        self_employment_income=np.zeros_like(calc("tax_unit_id"), dtype=float),  # Included in earned
-        interest_income=calc("taxable_interest_income") if _var_exists(sim, "taxable_interest_income", year) else np.zeros_like(calc("tax_unit_id"), dtype=float),
-        dividend_income=calc("qualified_dividend_income") if _var_exists(sim, "qualified_dividend_income", year) else np.zeros_like(calc("tax_unit_id"), dtype=float),
-        capital_gains=calc("long_term_capital_gains") + calc("short_term_capital_gains") if _var_exists(sim, "long_term_capital_gains", year) else np.zeros_like(calc("tax_unit_id"), dtype=float),
-        rental_income=calc("rental_income") if _var_exists(sim, "rental_income", year) else np.zeros_like(calc("tax_unit_id"), dtype=float),
-        social_security=calc("tax_unit_social_security") if _var_exists(sim, "tax_unit_social_security", year) else np.zeros_like(calc("tax_unit_id"), dtype=float),
-        pension_income=calc("taxable_pension_income") if _var_exists(sim, "taxable_pension_income", year) else np.zeros_like(calc("tax_unit_id"), dtype=float),
-        unemployment_compensation=calc("tax_unit_unemployment_compensation") if _var_exists(sim, "tax_unit_unemployment_compensation", year) else np.zeros_like(calc("tax_unit_id"), dtype=float),
-        other_income=np.zeros_like(calc("tax_unit_id"), dtype=float),
+        self_employment_income=np.zeros_like(tax_unit_id, dtype=float),  # Included in earned
+        interest_income=calc("taxable_interest_income") if _var_exists(sim, "taxable_interest_income", year) else np.zeros_like(tax_unit_id, dtype=float),
+        dividend_income=calc("qualified_dividend_income") if _var_exists(sim, "qualified_dividend_income", year) else np.zeros_like(tax_unit_id, dtype=float),
+        capital_gains=calc("long_term_capital_gains") + calc("short_term_capital_gains") if _var_exists(sim, "long_term_capital_gains", year) else np.zeros_like(tax_unit_id, dtype=float),
+        rental_income=calc("rental_income") if _var_exists(sim, "rental_income", year) else np.zeros_like(tax_unit_id, dtype=float),
+        social_security=calc("tax_unit_social_security") if _var_exists(sim, "tax_unit_social_security", year) else np.zeros_like(tax_unit_id, dtype=float),
+        pension_income=calc("taxable_pension_income") if _var_exists(sim, "taxable_pension_income", year) else np.zeros_like(tax_unit_id, dtype=float),
+        unemployment_compensation=calc("tax_unit_unemployment_compensation") if _var_exists(sim, "tax_unit_unemployment_compensation", year) else np.zeros_like(tax_unit_id, dtype=float),
+        other_income=np.zeros_like(tax_unit_id, dtype=float),
 
         investment_income=calc("net_investment_income"),
 
@@ -98,8 +150,17 @@ def load_common_dataset(year: int = 2024) -> CommonDataset:
         # Demographics
         eitc_child_count=calc("eitc_child_count"),
         ctc_child_count=calc("ctc_qualifying_children") if _var_exists(sim, "ctc_qualifying_children", year) else calc("eitc_child_count"),
-        head_age=np.zeros_like(calc("tax_unit_id"), dtype=float),  # Not directly available
-        spouse_age=np.zeros_like(calc("tax_unit_id"), dtype=float),
+        head_age=head_age,
+        spouse_age=spouse_age,
+
+        # Standard deduction inputs (from 26 USC 63)
+        head_is_blind=head_is_blind,
+        spouse_is_blind=spouse_is_blind,
+        head_is_dependent=head_is_dependent,
+
+        # CDCC inputs (from 26 USC 21)
+        cdcc_qualifying_individuals=calc("capped_count_cdcc_eligible") if _var_exists(sim, "capped_count_cdcc_eligible", year) else np.zeros_like(tax_unit_id, dtype=float),
+        childcare_expenses=calc("tax_unit_childcare_expenses") if _var_exists(sim, "tax_unit_childcare_expenses", year) else np.zeros_like(tax_unit_id, dtype=float),
     )
 
 

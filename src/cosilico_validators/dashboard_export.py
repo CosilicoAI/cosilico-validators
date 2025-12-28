@@ -92,7 +92,8 @@ def load_cosilico_engine():
 
     from cosilico.vectorized_executor import VectorizedExecutor
     from cosilico.dsl_parser import parse_dsl
-    return VectorizedExecutor, parse_dsl
+    from cosilico.dependency_resolver import DependencyResolver
+    return VectorizedExecutor, parse_dsl, DependencyResolver
 
 
 # EITC parameters for 2024 (from IRS Rev. Proc. 2023-34)
@@ -266,11 +267,16 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
     # Load Cosilico engine
     print("Loading Cosilico engine...")
     try:
-        VectorizedExecutor, Parser = load_cosilico_engine()
+        VectorizedExecutor, Parser, DependencyResolver = load_cosilico_engine()
         engine_available = True
+
+        # Create dependency resolver pointing to cosilico-us
+        statute_root = Path.home() / "CosilicoAI" / "cosilico-us"
+        dep_resolver = DependencyResolver(statute_root=statute_root)
     except ImportError as e:
         print(f"  Warning: Could not load engine: {e}")
         engine_available = False
+        dep_resolver = None
 
     # Get PE microsimulation
     print("Loading PolicyEngine calculations...")
@@ -406,131 +412,111 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
                     implemented = False
 
             # CTC (total) engine integration - 26 USC Section 24
-            # ctc = non_refundable_ctc + refundable_ctc (ACTC)
-            elif var_name == "ctc" and engine_available:
+            # Using lazy dependency resolution to automatically resolve imports
+            elif var_name == "ctc" and engine_available and dep_resolver:
                 try:
-                    # Load CTC formula from cosilico-us/statute/26/24/a.rac
-                    ctc_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "24" / "a.rac"
-                    if ctc_rac.exists():
-                        rac_code = ctc_rac.read_text()
+                    # Get tax liability from PE for tax limit calculation
+                    pe_tax_before_credits = np.array(sim.calculate("income_tax_before_credits", year))
+                    # Get EITC from PE for ACTC SS tax formula (3+ children)
+                    pe_eitc = np.array(sim.calculate("eitc", year))
+                    # Get SS taxes from PE for ACTC formula (use TaxUnit-level variable)
+                    pe_ss_taxes = np.array(sim.calculate("pr_refundable_ctc_social_security_tax", year))
 
-                        # Get tax liability from PE for tax limit calculation
-                        pe_tax_before_credits = np.array(sim.calculate("income_tax_before_credits", year))
-                        # Get EITC from PE for ACTC SS tax formula (3+ children)
-                        pe_eitc = np.array(sim.calculate("eitc", year))
-                        # Get SS taxes from PE for ACTC formula
-                        pe_ss_taxes = np.array(sim.calculate("employee_social_security_tax", year))
+                    # Build inputs - these break circular dependencies (like OpenFisca)
+                    inputs = {
+                        'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
+                        'adjusted_gross_income': dataset.adjusted_gross_income,
+                        'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                        'earned_income': dataset.earned_income,
+                        'tax_liability_limit': pe_tax_before_credits,
+                        'social_security_taxes': pe_ss_taxes,
+                        'earned_income_credit': pe_eitc,
+                    }
 
-                        # Build inputs from dataset
-                        inputs = {
-                            'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
-                            'adjusted_gross_income': dataset.adjusted_gross_income,
-                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
-                            'earned_income': dataset.earned_income,
-                            'tax_liability_limit': pe_tax_before_credits,
-                            'social_security_taxes': pe_ss_taxes,
-                            'earned_income_credit': pe_eitc,
-                        }
-
-                        # Execute through engine
-                        executor = VectorizedExecutor(parameters=CTC_PARAMS_2024)
-                        results_dict = executor.execute(
-                            code=rac_code,
-                            inputs=inputs,
-                            output_variables=['ctc_total']
-                        )
-                        cos_values = results_dict['ctc_total']
-                        implemented = True
+                    # Execute with lazy dependency resolution (like OpenFisca)
+                    executor = VectorizedExecutor(
+                        parameters=CTC_PARAMS_2024,
+                        dependency_resolver=dep_resolver
+                    )
+                    results_dict = executor.execute_lazy(
+                        entry_point="statute/26/24/a",
+                        inputs=inputs,
+                        output_variables=['ctc_total']
+                    )
+                    cos_values = results_dict['ctc_total']
+                    implemented = True
                 except Exception as e:
                     print(f"    CTC engine failed: {e}")
+                    import traceback
+                    traceback.print_exc()
                     implemented = False
 
             # Non-refundable CTC engine integration - 26 USC Section 24(a)
             # child_tax_credit = min(ctc_before_limit, tax_liability)
-            elif var_name == "non_refundable_ctc" and engine_available:
+            elif var_name == "non_refundable_ctc" and engine_available and dep_resolver:
                 try:
-                    # Load CTC formula from cosilico-us/statute/26/24/a.rac
-                    ctc_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "24" / "a.rac"
-                    if ctc_rac.exists():
-                        rac_code = ctc_rac.read_text()
+                    # Get tax liability from PE for tax limit calculation
+                    pe_tax_before_credits = np.array(sim.calculate("income_tax_before_credits", year))
 
-                        # Get tax liability from PE for tax limit calculation
-                        pe_tax_before_credits = np.array(sim.calculate("income_tax_before_credits", year))
+                    # Build inputs from dataset (break circular deps)
+                    inputs = {
+                        'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
+                        'adjusted_gross_income': dataset.adjusted_gross_income,
+                        'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                        'tax_liability_limit': pe_tax_before_credits,
+                    }
 
-                        # Build inputs from dataset
-                        inputs = {
-                            'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
-                            'adjusted_gross_income': dataset.adjusted_gross_income,
-                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
-                            'tax_liability_limit': pe_tax_before_credits,
-                        }
-
-                        # Execute through engine
-                        executor = VectorizedExecutor(parameters=CTC_PARAMS_2024)
-                        results_dict = executor.execute(
-                            code=rac_code,
-                            inputs=inputs,
-                            output_variables=['child_tax_credit']
-                        )
-                        cos_values = results_dict['child_tax_credit']
-                        implemented = True
+                    # Execute with lazy dependency resolution
+                    executor = VectorizedExecutor(
+                        parameters=CTC_PARAMS_2024,
+                        dependency_resolver=dep_resolver
+                    )
+                    results_dict = executor.execute_lazy(
+                        entry_point="statute/26/24/a",
+                        inputs=inputs,
+                        output_variables=['child_tax_credit']
+                    )
+                    cos_values = results_dict['child_tax_credit']
+                    implemented = True
                 except Exception as e:
                     print(f"    Non-refundable CTC engine failed: {e}")
                     implemented = False
 
             # Refundable CTC (ACTC) engine integration - 26 USC Section 24(d)
             # additional_child_tax_credit = min(ctc_before_limit, max(earned_formula, ss_formula))
-            elif var_name == "refundable_ctc" and engine_available:
+            elif var_name == "refundable_ctc" and engine_available and dep_resolver:
                 try:
-                    # Load ACTC formula from cosilico-us/statute/26/24/d/1/B.rac
-                    actc_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "24" / "d" / "1" / "B.rac"
-                    if actc_rac.exists():
-                        rac_code = actc_rac.read_text()
+                    # Get EITC from PE for ACTC SS tax formula (3+ children)
+                    pe_eitc = np.array(sim.calculate("eitc", year))
+                    # Get SS taxes from PE for ACTC formula
+                    # Use TaxUnit-level variable for refundable CTC calculation
+                    pe_ss_taxes = np.array(sim.calculate("pr_refundable_ctc_social_security_tax", year))
+                    # Get tax liability from PE for ctc_before_limit calculation
+                    pe_tax_before_credits = np.array(sim.calculate("income_tax_before_credits", year))
 
-                        # Get EITC from PE for ACTC SS tax formula (3+ children)
-                        pe_eitc = np.array(sim.calculate("eitc", year))
-                        # Get SS taxes from PE for ACTC formula
-                        pe_ss_taxes = np.array(sim.calculate("employee_social_security_tax", year))
-                        # Get tax liability from PE for ctc_before_limit calculation
-                        pe_tax_before_credits = np.array(sim.calculate("income_tax_before_credits", year))
+                    # Build inputs - lazy resolution handles child_tax_credit_before_limit automatically
+                    inputs = {
+                        'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
+                        'adjusted_gross_income': dataset.adjusted_gross_income,
+                        'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                        'earned_income': dataset.earned_income,
+                        'tax_liability_limit': pe_tax_before_credits,
+                        'social_security_taxes': pe_ss_taxes,
+                        'earned_income_credit': pe_eitc,
+                    }
 
-                        # Need to compute ctc_before_limit first (CTC after phaseout but before tax limit)
-                        # This requires running the main CTC calculation
-                        ctc_rac_main = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "24" / "a.rac"
-                        ctc_code = ctc_rac_main.read_text()
-
-                        inputs_ctc = {
-                            'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
-                            'adjusted_gross_income': dataset.adjusted_gross_income,
-                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
-                            'tax_liability_limit': pe_tax_before_credits,
-                        }
-
-                        executor = VectorizedExecutor(parameters=CTC_PARAMS_2024)
-                        ctc_results = executor.execute(
-                            code=ctc_code,
-                            inputs=inputs_ctc,
-                            output_variables=['child_tax_credit_before_limit']
-                        )
-                        ctc_before_limit = ctc_results['child_tax_credit_before_limit']
-
-                        # Build inputs for ACTC calculation
-                        inputs = {
-                            'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
-                            'earned_income': dataset.earned_income,
-                            'child_tax_credit_before_limit': ctc_before_limit,
-                            'social_security_taxes': pe_ss_taxes,
-                            'earned_income_credit': pe_eitc,
-                        }
-
-                        # Execute ACTC through engine
-                        results_dict = executor.execute(
-                            code=rac_code,
-                            inputs=inputs,
-                            output_variables=['additional_child_tax_credit']
-                        )
-                        cos_values = results_dict['additional_child_tax_credit']
-                        implemented = True
+                    # Execute with lazy dependency resolution - will auto-compute child_tax_credit_before_limit
+                    executor = VectorizedExecutor(
+                        parameters=CTC_PARAMS_2024,
+                        dependency_resolver=dep_resolver
+                    )
+                    results_dict = executor.execute_lazy(
+                        entry_point="statute/26/24/d/1/B",
+                        inputs=inputs,
+                        output_variables=['additional_child_tax_credit']
+                    )
+                    cos_values = results_dict['additional_child_tax_credit']
+                    implemented = True
                 except Exception as e:
                     print(f"    Refundable CTC (ACTC) engine failed: {e}")
                     implemented = False
