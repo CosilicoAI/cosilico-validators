@@ -112,6 +112,86 @@ EITC_PARAMS_2024 = {
     'joint_adjustment': 6570,  # Additional threshold for joint filers
 }
 
+# NIIT parameters for 2024 (from 26 USC Section 1411)
+# Note: NIIT thresholds are NOT indexed for inflation
+NIIT_PARAMS_2024 = {
+    'niit_rate': 0.038,              # 3.8% surtax
+    'threshold_joint': 250000,       # Joint filers and surviving spouse
+    'threshold_separate': 125000,    # Married filing separately
+    'threshold_other': 200000,       # Single, HOH, and others
+}
+
+# CTC parameters for 2024 (from IRS Rev. Proc. 2023-34 and TCJA)
+# Reference: 26 USC 24(h)(2), (h)(3), (h)(5), (b)(1), (d)(1)(B)
+CTC_PARAMS_2024 = {
+    # 26 USC 24(h)(2) - Credit amount per qualifying child
+    'credit_amount': 2000,
+
+    # 26 USC 24(h)(5) - Maximum refundable (ACTC) per child
+    # Base $1,400 indexed for inflation; 2024 value is $1,700
+    'refundable_max': 1700,
+
+    # 26 USC 24(h)(3) - Phaseout thresholds (TCJA 2018-2025)
+    'phaseout_threshold_joint': 400000,
+    'phaseout_threshold_other': 200000,
+
+    # 26 USC 24(b)(1) - Phaseout mechanics
+    'phaseout_rate': 50,       # $50 reduction
+    'phaseout_increment': 1000,  # per $1,000 (or fraction) over threshold
+
+    # 26 USC 24(d)(1)(B)(i) - ACTC earned income formula
+    'earned_income_threshold': 2500,  # TCJA threshold
+    'refundable_rate': 0.15,  # 15% of earned income above threshold
+
+    # 26 USC 24(d)(1)(B)(ii) - ACTC SS tax formula threshold
+    'qualifying_children_threshold': 3,  # 3+ children to use SS formula
+}
+
+# CDCC parameters for 2024 (26 USC 21)
+# Note: 2024 uses permanent law parameters (ARPA enhancements expired after 2021)
+CDCC_PARAMS_2024 = {
+    # Expense limits per 26 USC 21(c)
+    'one_qualifying_individual': 3000,      # $3,000 max expenses for 1 qualifying individual
+    'two_or_more_qualifying_individuals': 6000,  # $6,000 max expenses for 2+ qualifying individuals
+
+    # Credit rate per 26 USC 21(a)(2)
+    'maximum_rate': 0.35,          # 35% starting rate
+    'minimum_rate': 0.20,          # 20% floor (cannot go below)
+    'phase_down_threshold': 15000, # AGI threshold where phasedown starts
+    'phase_down_increment': 2000,  # Rate reduces per $2,000 of AGI
+    'phase_down_rate': 0.01,       # 1 percentage point reduction per increment
+
+    # ARPA 2021 phaseout (not applicable for 2024, set to infinity)
+    'arpa_complete_phaseout_threshold': float('inf'),  # No complete phaseout in 2024
+
+    # Qualifying individual age limit per 26 USC 21(b)(1)(A)
+    'child_age_limit': 13,  # Under age 13
+}
+
+# Standard Deduction parameters for 2024 (from IRS Rev. Proc. 2023-34)
+# Reference: 26 USC 63(c), (f)
+STD_DEDUCTION_PARAMS_2024 = {
+    # 26 USC 63(c)(2) - Basic standard deduction amounts
+    'basic_joint': 29200,           # MFJ and surviving spouse
+    'basic_head_of_household': 21900,  # Head of household
+    'basic_single': 14600,          # Single and MFS
+
+    # 26 USC 63(f)(1), (f)(3) - Additional amounts for aged (65+)
+    'additional_aged_married': 1550,    # For married/surviving spouse
+    'additional_aged_unmarried': 1950,  # For single/HOH
+
+    # 26 USC 63(f)(2), (f)(3) - Additional amounts for blind
+    'additional_blind_married': 1550,   # For married/surviving spouse
+    'additional_blind_unmarried': 1950, # For single/HOH
+
+    # 26 USC 63(c)(5) - Dependent standard deduction
+    'dependent_minimum': 1300,      # Floor for dependents
+    'dependent_earned_addon': 450,  # Added to earned income
+
+    # 26 USC 63(f)(1) - Age threshold
+    'aged_threshold': 65,
+}
+
 
 def load_rac_file(section: str) -> Optional[str]:
     """Load .rac file for a given section from cosilico-us.
@@ -238,6 +318,299 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
                         implemented = True
                 except Exception as e:
                     print(f"    Engine execution failed: {e}")
+                    implemented = False
+
+            # Special handling for NIIT - Net Investment Income Tax
+            if var_name == "net_investment_income_tax" and engine_available:
+                try:
+                    # Load NIIT formula from standalone validation file (no imports)
+                    niit_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "1411.rac"
+                    if niit_rac.exists():
+                        rac_code = niit_rac.read_text()
+
+                        # Build inputs from dataset
+                        # Section 1411(d): MAGI = AGI + foreign earned income exclusion
+                        # For CPS data, we assume no foreign earned income exclusion
+                        inputs = {
+                            'net_investment_income': dataset.investment_income,
+                            'adjusted_gross_income': dataset.adjusted_gross_income,
+                            'foreign_earned_income_exclusion': np.zeros(dataset.n_records),
+                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                        }
+
+                        # Execute through engine using standalone version (no imports)
+                        executor = VectorizedExecutor(parameters=NIIT_PARAMS_2024)
+                        results_dict = executor.execute(
+                            code=rac_code,
+                            inputs=inputs,
+                            output_variables=['niit_standalone']
+                        )
+                        cos_values = results_dict['niit_standalone']
+                        implemented = True
+                except Exception as e:
+                    print(f"    NIIT engine failed: {e}")
+                    implemented = False
+
+            # AGI engine integration - 26 USC Section 62
+            # AGI = Gross Income (Section 61) - Above-the-line deductions (Section 62(a))
+            # Gross income: wages, self-employment, interest, dividends, capital gains,
+            #   rental, social security, pension, unemployment, other income
+            # Above-the-line deductions: educator expense, IRA, HSA, student loan interest,
+            #   tip income (OBBBA), qualified overtime (OBBBA)
+            elif var_name == "adjusted_gross_income" and engine_available:
+                try:
+                    # Load AGI formula from cosilico-us/statute/26/62/a.rac
+                    agi_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "62" / "a.rac"
+                    if agi_rac.exists():
+                        rac_code = agi_rac.read_text()
+
+                        # Build inputs from CommonDataset income fields
+                        # Map to .rac variable names from imports in 26/62/a.rac
+                        inputs = {
+                            # Gross income components (26 USC Section 61)
+                            'wages': dataset.wages,
+                            'salaries': np.zeros(dataset.n_records),  # Combined in wages
+                            'tips': np.zeros(dataset.n_records),  # Combined in wages
+                            'self_employment_income': dataset.self_employment_income,
+                            'interest_income': dataset.interest_income,
+                            'dividend_income': dataset.dividend_income,
+                            'gains_from_property': dataset.capital_gains,
+                            'other_income': (
+                                dataset.rental_income +
+                                dataset.social_security +
+                                dataset.pension_income +
+                                dataset.other_income
+                            ),
+                            'unemployment_compensation': dataset.unemployment_compensation,
+                            # Above-the-line deductions (26 USC Section 62(a))
+                            # Not available in CommonDataset - set to zero for baseline
+                            'educator_expense_deduction': np.zeros(dataset.n_records),
+                            'ira_deduction': np.zeros(dataset.n_records),
+                            'hsa_deduction': np.zeros(dataset.n_records),
+                            'student_loan_interest_deduction': np.zeros(dataset.n_records),
+                            'tip_income_deduction': np.zeros(dataset.n_records),
+                            'qualified_overtime_deduction': np.zeros(dataset.n_records),
+                        }
+
+                        # Execute through engine
+                        executor = VectorizedExecutor()
+                        results_dict = executor.execute(
+                            code=rac_code,
+                            inputs=inputs,
+                            output_variables=['adjusted_gross_income']
+                        )
+                        cos_values = results_dict['adjusted_gross_income']
+                        implemented = True
+                except Exception as e:
+                    print(f"    AGI engine failed: {e}")
+                    implemented = False
+
+            # CTC (total) engine integration - 26 USC Section 24
+            # ctc = non_refundable_ctc + refundable_ctc (ACTC)
+            elif var_name == "ctc" and engine_available:
+                try:
+                    # Load CTC formula from cosilico-us/statute/26/24/a.rac
+                    ctc_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "24" / "a.rac"
+                    if ctc_rac.exists():
+                        rac_code = ctc_rac.read_text()
+
+                        # Get tax liability from PE for tax limit calculation
+                        pe_tax_before_credits = np.array(sim.calculate("income_tax_before_credits", year))
+                        # Get EITC from PE for ACTC SS tax formula (3+ children)
+                        pe_eitc = np.array(sim.calculate("eitc", year))
+                        # Get SS taxes from PE for ACTC formula
+                        pe_ss_taxes = np.array(sim.calculate("employee_social_security_tax", year))
+
+                        # Build inputs from dataset
+                        inputs = {
+                            'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
+                            'adjusted_gross_income': dataset.adjusted_gross_income,
+                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                            'earned_income': dataset.earned_income,
+                            'tax_liability_limit': pe_tax_before_credits,
+                            'social_security_taxes': pe_ss_taxes,
+                            'earned_income_credit': pe_eitc,
+                        }
+
+                        # Execute through engine
+                        executor = VectorizedExecutor(parameters=CTC_PARAMS_2024)
+                        results_dict = executor.execute(
+                            code=rac_code,
+                            inputs=inputs,
+                            output_variables=['ctc_total']
+                        )
+                        cos_values = results_dict['ctc_total']
+                        implemented = True
+                except Exception as e:
+                    print(f"    CTC engine failed: {e}")
+                    implemented = False
+
+            # Non-refundable CTC engine integration - 26 USC Section 24(a)
+            # child_tax_credit = min(ctc_before_limit, tax_liability)
+            elif var_name == "non_refundable_ctc" and engine_available:
+                try:
+                    # Load CTC formula from cosilico-us/statute/26/24/a.rac
+                    ctc_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "24" / "a.rac"
+                    if ctc_rac.exists():
+                        rac_code = ctc_rac.read_text()
+
+                        # Get tax liability from PE for tax limit calculation
+                        pe_tax_before_credits = np.array(sim.calculate("income_tax_before_credits", year))
+
+                        # Build inputs from dataset
+                        inputs = {
+                            'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
+                            'adjusted_gross_income': dataset.adjusted_gross_income,
+                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                            'tax_liability_limit': pe_tax_before_credits,
+                        }
+
+                        # Execute through engine
+                        executor = VectorizedExecutor(parameters=CTC_PARAMS_2024)
+                        results_dict = executor.execute(
+                            code=rac_code,
+                            inputs=inputs,
+                            output_variables=['child_tax_credit']
+                        )
+                        cos_values = results_dict['child_tax_credit']
+                        implemented = True
+                except Exception as e:
+                    print(f"    Non-refundable CTC engine failed: {e}")
+                    implemented = False
+
+            # Refundable CTC (ACTC) engine integration - 26 USC Section 24(d)
+            # additional_child_tax_credit = min(ctc_before_limit, max(earned_formula, ss_formula))
+            elif var_name == "refundable_ctc" and engine_available:
+                try:
+                    # Load ACTC formula from cosilico-us/statute/26/24/d/1/B.rac
+                    actc_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "24" / "d" / "1" / "B.rac"
+                    if actc_rac.exists():
+                        rac_code = actc_rac.read_text()
+
+                        # Get EITC from PE for ACTC SS tax formula (3+ children)
+                        pe_eitc = np.array(sim.calculate("eitc", year))
+                        # Get SS taxes from PE for ACTC formula
+                        pe_ss_taxes = np.array(sim.calculate("employee_social_security_tax", year))
+                        # Get tax liability from PE for ctc_before_limit calculation
+                        pe_tax_before_credits = np.array(sim.calculate("income_tax_before_credits", year))
+
+                        # Need to compute ctc_before_limit first (CTC after phaseout but before tax limit)
+                        # This requires running the main CTC calculation
+                        ctc_rac_main = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "24" / "a.rac"
+                        ctc_code = ctc_rac_main.read_text()
+
+                        inputs_ctc = {
+                            'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
+                            'adjusted_gross_income': dataset.adjusted_gross_income,
+                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                            'tax_liability_limit': pe_tax_before_credits,
+                        }
+
+                        executor = VectorizedExecutor(parameters=CTC_PARAMS_2024)
+                        ctc_results = executor.execute(
+                            code=ctc_code,
+                            inputs=inputs_ctc,
+                            output_variables=['child_tax_credit_before_limit']
+                        )
+                        ctc_before_limit = ctc_results['child_tax_credit_before_limit']
+
+                        # Build inputs for ACTC calculation
+                        inputs = {
+                            'num_ctc_qualifying_children': dataset.ctc_child_count.astype(int),
+                            'earned_income': dataset.earned_income,
+                            'child_tax_credit_before_limit': ctc_before_limit,
+                            'social_security_taxes': pe_ss_taxes,
+                            'earned_income_credit': pe_eitc,
+                        }
+
+                        # Execute ACTC through engine
+                        results_dict = executor.execute(
+                            code=rac_code,
+                            inputs=inputs,
+                            output_variables=['additional_child_tax_credit']
+                        )
+                        cos_values = results_dict['additional_child_tax_credit']
+                        implemented = True
+                except Exception as e:
+                    print(f"    Refundable CTC (ACTC) engine failed: {e}")
+                    implemented = False
+
+            # CDCC engine integration - 26 USC Section 21
+            # Child and Dependent Care Credit
+            # cdcc = applicable_percentage * min(expenses, expense_limit, earned_income_limit)
+            elif var_name == "cdcc" and engine_available:
+                try:
+                    # Load CDCC formula from cosilico-us/statute/26/21/a.rac
+                    cdcc_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "21" / "a.rac"
+                    if cdcc_rac.exists():
+                        rac_code = cdcc_rac.read_text()
+
+                        # Build inputs from CommonDataset (now includes CDCC fields)
+                        # Note: dataset.childcare_expenses and cdcc_qualifying_individuals
+                        # are loaded from PE's tax_unit_childcare_expenses and capped_count_cdcc_eligible
+                        inputs = {
+                            # Childcare expenses paid during the year (26 USC 21(b)(2))
+                            'cdcc_expenses_paid': dataset.childcare_expenses,
+                            # Number of qualifying individuals - children under 13 or disabled (26 USC 21(b)(1))
+                            'num_cdcc_qualifying_individuals': dataset.cdcc_qualifying_individuals.astype(int),
+                            # AGI for credit rate calculation (26 USC 21(a)(2))
+                            'adjusted_gross_income': dataset.adjusted_gross_income,
+                            # Earned income for limitation - lesser of spouse earnings for married (26 USC 21(d))
+                            'earned_income': dataset.earned_income,
+                            # Filing status for earned income limit calculation
+                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                        }
+
+                        # Execute through engine using standalone formula
+                        executor = VectorizedExecutor(parameters=CDCC_PARAMS_2024)
+                        results_dict = executor.execute(
+                            code=rac_code,
+                            inputs=inputs,
+                            output_variables=['cdcc_standalone']
+                        )
+                        cos_values = results_dict['cdcc_standalone']
+                        implemented = True
+                except Exception as e:
+                    print(f"    CDCC engine failed: {e}")
+                    implemented = False
+
+            # Standard Deduction engine integration - 26 USC Section 63(c), (f)
+            # standard_deduction = basic_standard_deduction + additional_standard_deduction
+            # Depends on: filing_status, age, blind status, dependent status
+            elif var_name == "standard_deduction" and engine_available:
+                try:
+                    # Load Standard Deduction formula from cosilico-us/statute/26/63/c.rac
+                    std_ded_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "63" / "c.rac"
+                    if std_ded_rac.exists():
+                        rac_code = std_ded_rac.read_text()
+
+                        # Build inputs for standalone formula
+                        inputs = {
+                            # Filing status - use raw values, enums handle JOINT etc
+                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                            # Max age in tax unit for 63(f)(1) aged deduction
+                            'max_age': np.maximum(dataset.head_age, dataset.spouse_age),
+                            # Any blind in tax unit for 63(f)(2) blind deduction
+                            'any_blind': dataset.head_is_blind | dataset.spouse_is_blind,
+                            # Dependent status for 63(c)(5) limited deduction
+                            'is_dependent': dataset.head_is_dependent,
+                            # Earned income for dependent calculation
+                            'earned_income': dataset.earned_income,
+                            # 63(c)(6) ineligibility - assume none
+                            'is_ineligible_for_standard_deduction': np.zeros(dataset.n_records, dtype=bool),
+                        }
+
+                        # Execute through engine using standalone formula
+                        executor = VectorizedExecutor(parameters=STD_DEDUCTION_PARAMS_2024)
+                        results_dict = executor.execute(
+                            code=rac_code,
+                            inputs=inputs,
+                            output_variables=['standard_deduction_standalone']
+                        )
+                        cos_values = results_dict['standard_deduction_standalone']
+                        implemented = True
+                except Exception as e:
+                    print(f"    Standard Deduction engine failed: {e}")
                     implemented = False
 
             if not implemented:
