@@ -1,7 +1,7 @@
 {
   "isSampleData": false,
-  "timestamp": "2025-12-28T09:08:09.987156",
-  "commit": "8d72579",
+  "timestamp": "2025-12-28T09:32:53.857836",
+  "commit": "9278f95",
   "dataSource": "PolicyEngine Enhanced CPS 2024",
   "householdsTotal": 30182,
   "sections": [
@@ -9,23 +9,23 @@
       "section": "26/32",
       "title": "Earned Income Tax Credit",
       "variable": "eitc",
-      "implemented": false,
+      "implemented": true,
       "households": 30182,
       "testCases": [],
       "summary": {
         "total": 30182,
-        "matches": 27537,
-        "matchRate": 0.9123649857530979,
-        "meanAbsoluteError": 209.14185670362212
+        "matches": 26103,
+        "matchRate": 0.8648532237757603,
+        "meanAbsoluteError": 109.566572557025
       },
       "validatorBreakdown": {
         "policyengine": {
-          "matches": 27537,
+          "matches": 26103,
           "total": 30182,
-          "rate": 0.9123649857530979
+          "rate": 0.8648532237757603
         }
       },
-      "notes": "Not yet implemented in .rac files"
+      "notes": "Cosilico total: $48.6B, PE total: $50.1B, Diff: $-1.4B"
     },
     {
       "section": "26/1",
@@ -293,16 +293,16 @@
     }
   ],
   "coverage": {
-    "implemented": 0,
+    "implemented": 1,
     "total": 13,
-    "percentage": 0.0
+    "percentage": 0.07692307692307693
   },
   "overall": {
     "totalHouseholds": 30182,
     "totalTests": 392366,
-    "totalMatches": 0,
-    "matchRate": 0.0,
-    "meanAbsoluteError": 0.0
+    "totalMatches": 26103,
+    "matchRate": 0.8648532237757603,
+    "meanAbsoluteError": 109.566572557025
   },
   "validators": [
     {

@@ -91,8 +91,26 @@ def load_cosilico_engine():
         sys.path.insert(0, str(engine_path))
 
     from cosilico.vectorized_executor import VectorizedExecutor
-    from cosilico.dsl_parser import Parser
-    return VectorizedExecutor, Parser
+    from cosilico.dsl_parser import parse_dsl
+    return VectorizedExecutor, parse_dsl
+
+
+# EITC parameters for 2024 (from IRS Rev. Proc. 2023-34)
+EITC_PARAMS_2024 = {
+    'credit_rate_0': 0.0765,   # 0 children
+    'credit_rate_1': 0.34,     # 1 child
+    'credit_rate_2': 0.40,     # 2 children
+    'credit_rate_3': 0.45,     # 3+ children
+    'earned_income_cap_0': 7840,
+    'earned_income_cap_1': 11750,
+    'earned_income_cap_2': 16510,
+    'phaseout_rate_0': 0.0765,
+    'phaseout_rate_1': 0.1598,
+    'phaseout_rate_2': 0.2106,
+    'phaseout_start_0': 9800,
+    'phaseout_start_1': 21560,
+    'joint_adjustment': 6570,  # Additional threshold for joint filers
+}
 
 
 def load_rac_file(section: str) -> Optional[str]:
@@ -189,25 +207,51 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
 
             # Try to load and execute .rac file
             rac_code = load_rac_file(meta["section"])
-            implemented = rac_code is not None and engine_available
+            implemented = False
+            cos_values = None
 
-            if implemented:
-                # TODO: Execute .rac file through engine
-                # For now, mark as not implemented until engine integration complete
-                # executor = VectorizedExecutor(...)
-                # cos_values = executor.execute(rac_code, inputs)
-                implemented = False  # Engine integration pending
+            # Special handling for EITC - we have working engine integration
+            if var_name == "eitc" and engine_available:
+                try:
+                    # Load EITC formula from cosilico-us/statute/26/32.rac
+                    eitc_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "32.rac"
+                    if eitc_rac.exists():
+                        rac_code = eitc_rac.read_text()
+
+                        # Build inputs from dataset
+                        inputs = {
+                            'is_eligible_individual': np.ones(dataset.n_records, dtype=bool),
+                            'num_qualifying_children': np.clip(dataset.eitc_child_count, 0, 3).astype(int),
+                            'earned_income': dataset.earned_income,
+                            'adjusted_gross_income': dataset.adjusted_gross_income,
+                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                        }
+
+                        # Execute through engine
+                        executor = VectorizedExecutor(parameters=EITC_PARAMS_2024)
+                        results_dict = executor.execute(
+                            code=rac_code,
+                            inputs=inputs,
+                            output_variables=['eitc_standalone']
+                        )
+                        cos_values = results_dict['eitc_standalone']
+                        implemented = True
+                except Exception as e:
+                    print(f"    Engine execution failed: {e}")
+                    implemented = False
 
             if not implemented:
                 # Return zeros for unimplemented variables
                 cos_func = lambda ds: np.zeros(ds.n_records)
             else:
-                cos_func = lambda ds: cos_values  # From engine execution
+                # Capture cos_values in closure
+                _cos_values = cos_values
+                cos_func = lambda ds, v=_cos_values: v
 
             result = compare_variable(dataset, cos_func, pe_values, var_name)
             results.append((result, meta, implemented))
 
-            status = "✓" if implemented else "○ (not in engine yet)"
+            status = "✓ ENGINE" if implemented else "○ (not in engine yet)"
             print(f"  {status} Match rate: {result.match_rate*100:.1f}%")
 
         except Exception as e:
