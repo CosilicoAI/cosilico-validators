@@ -421,5 +421,59 @@ def compare(year, tolerance, variables, output):
         console.print(f"\n[green]Dashboard saved to {output}[/green]")
 
 
+@cli.command()
+@click.option("--year", "-y", default=2024, help="Tax year")
+@click.option("--output", "-o", type=click.Path(), help="Output JSON file for dashboard")
+def dashboard(year, output):
+    """Export validation results to cosilico.ai dashboard format.
+
+    Generates a ValidationResults JSON file compatible with the
+    cosilico.ai/validation dashboard page.
+
+    Example:
+        cosilico-validators dashboard -o validation-results.json
+        cp validation-results.json ~/CosilicoAI/cosilico.ai/public/data/
+    """
+    from cosilico_validators.dashboard_export import run_export
+    from pathlib import Path
+
+    console.print(f"\n[bold]Dashboard Export[/bold]")
+    console.print(f"Year: {year}\n")
+
+    output_path = Path(output) if output else None
+
+    try:
+        data = run_export(year=year, output_path=output_path)
+    except ImportError as e:
+        raise click.ClickException(str(e))
+
+    # Display summary
+    table = Table(title="Validation Summary")
+    table.add_column("Variable", style="cyan")
+    table.add_column("Section")
+    table.add_column("Match Rate", justify="right")
+    table.add_column("MAE", justify="right")
+
+    for section in data["sections"]:
+        match_pct = section["summary"]["matchRate"] * 100
+        match_color = "green" if match_pct > 90 else "yellow" if match_pct > 75 else "red"
+        table.add_row(
+            section["variable"],
+            section["section"],
+            f"[{match_color}]{match_pct:.1f}%[/{match_color}]",
+            f"${section['summary']['meanAbsoluteError']:,.0f}",
+        )
+
+    console.print(table)
+
+    overall = data["overall"]
+    console.print(f"\n[bold]Overall:[/bold] {overall['matchRate']*100:.1f}% match rate")
+    console.print(f"Households: {overall['totalHouseholds']:,}")
+    console.print(f"Mean Absolute Error: ${overall['meanAbsoluteError']:,.2f}")
+
+    if output_path:
+        console.print(f"\n[green]Dashboard JSON saved to {output_path}[/green]")
+
+
 if __name__ == "__main__":
     cli()
