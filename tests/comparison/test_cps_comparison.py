@@ -68,11 +68,12 @@ class TestVariableMapping:
             assert "title" in config, f"{var_name} missing title"
 
     def test_eitc_mapping(self):
-        """EITC maps correctly."""
+        """EITC maps correctly - column derived from statute."""
         from cosilico_validators.comparison.cps import COMPARISON_VARIABLES
 
         assert "eitc" in COMPARISON_VARIABLES
-        assert COMPARISON_VARIABLES["eitc"]["cosilico_col"] == "cos_eitc"
+        assert COMPARISON_VARIABLES["eitc"]["statute"] == "26/32.rac::eitc"
+        assert COMPARISON_VARIABLES["eitc"]["cosilico_col"] == "eitc"  # Derived from statute
         assert COMPARISON_VARIABLES["eitc"]["pe_var"] == "eitc"
 
 

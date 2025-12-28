@@ -42,13 +42,8 @@ def load_variable_mappings() -> dict[str, dict]:
     for var_name, config in data.get("variables", {}).items():
         statute = config.get("statute", "")
 
-        # Use cosilico_override if present, otherwise derive from statute
-        if config.get("cosilico_override"):
-            cosilico_col = config["cosilico_override"]
-        elif "::" in statute:
-            cosilico_col = statute.split("::")[-1]
-        else:
-            cosilico_col = var_name
+        # Cosilico column name = variable name from statute (after ::)
+        cosilico_col = statute.split("::")[-1] if "::" in statute else var_name
 
         result[var_name] = {
             "title": config.get("title", var_name),

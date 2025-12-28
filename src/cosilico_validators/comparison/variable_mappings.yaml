@@ -3,15 +3,12 @@
 # The `statute` field references cosilico-us statute definitions.
 # Format: {title}/{section}.rac::{variable_name}
 #
-# The variable name after :: is used as the Cosilico output column,
-# unless `cosilico_override` specifies a different column name
-# (needed when CPS runner uses non-standard names like cos_*).
+# The variable name after :: is the output column name in Cosilico.
 
 variables:
   eitc:
     title: Earned Income Tax Credit
     statute: 26/32.rac::eitc
-    cosilico_override: cos_eitc  # TODO: fix CPS runner to use statute name
     policyengine: eitc
     taxcalc: eitc
     taxsim: v25
@@ -19,7 +16,6 @@ variables:
   ctc:
     title: Child Tax Credit (Non-refundable)
     statute: 26/24.rac::non_refundable_ctc
-    cosilico_override: cos_ctc_nonref
     policyengine: non_refundable_ctc
     taxcalc: c07220
     taxsim: v22
@@ -27,7 +23,6 @@ variables:
   ctc_refundable:
     title: Additional Child Tax Credit (Refundable)
     statute: 26/24.rac::refundable_ctc
-    cosilico_override: cos_ctc_ref
     policyengine: refundable_ctc
     taxcalc: c11070
     taxsim: actc
@@ -35,7 +30,6 @@ variables:
   ctc_total:
     title: Child Tax Credit (Total)
     statute: 26/24.rac::total_child_tax_credit
-    cosilico_override: cos_ctc_total
     policyengine: ctc
     taxcalc: null
     taxsim: null
@@ -44,7 +38,6 @@ variables:
   income_tax:
     title: Federal Income Tax
     statute: 26/1.rac::income_tax
-    cosilico_override: cos_income_tax
     policyengine: income_tax_before_credits
     taxcalc: iitax
     taxsim: fiitax
@@ -52,7 +45,6 @@ variables:
   income_tax_before_credits:
     title: Income Tax Before Credits
     statute: 26/1.rac::income_tax_before_credits
-    cosilico_override: cos_income_tax
     policyengine: income_tax_before_credits
     taxcalc: c05800
     taxsim: v19
@@ -60,7 +52,6 @@ variables:
   se_tax:
     title: Self-Employment Tax
     statute: 26/1401/a.rac::self_employment_tax
-    cosilico_override: cos_se_tax
     policyengine: self_employment_tax
     policyengine_entity: person
     taxcalc: setax
@@ -69,7 +60,6 @@ variables:
   niit:
     title: Net Investment Income Tax
     statute: 26/1411/a.rac::niit
-    cosilico_override: cos_niit
     policyengine: net_investment_income_tax
     taxcalc: niit
     taxsim: niit
@@ -91,7 +81,6 @@ variables:
   standard_deduction:
     title: Standard Deduction
     statute: 26/63.rac::standard_deduction
-    cosilico_override: cos_standard_deduction
     policyengine: standard_deduction
     taxcalc: standard
     taxsim: v13
