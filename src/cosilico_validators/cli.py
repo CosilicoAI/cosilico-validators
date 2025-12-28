@@ -475,5 +475,238 @@ def dashboard(year, output):
         console.print(f"\n[green]Dashboard JSON saved to {output_path}[/green]")
 
 
+# ============================================================================
+# HARNESS COMMANDS
+# ============================================================================
+
+
+@cli.group()
+def harness():
+    """Validation harness for encoding work."""
+    pass
+
+
+@harness.command("run")
+@click.option("--only", type=click.Choice(["alignment", "quality", "review"]), help="Run only specific check")
+@click.option("--output", "-o", type=click.Path(), help="Save results to JSON file")
+@click.option("--baseline", "-b", type=click.Path(), help="Compare against baseline")
+def harness_run(only, output, baseline):
+    """Run validation harness.
+
+    Example:
+        cosilico-validators harness run
+        cosilico-validators harness run --only quality
+        cosilico-validators harness run -o current.json -b baselines/main.json
+    """
+    from cosilico_validators.harness.runner import run_harness
+    from cosilico_validators.harness.checkpoint import (
+        save_checkpoint,
+        load_checkpoint,
+        Checkpoint,
+    )
+    from cosilico_validators.harness.scorecard import generate_compact_scorecard
+
+    console.print(f"\n[bold]Cosilico Validation Harness[/bold]")
+    if only:
+        console.print(f"Running: {only}")
+    console.print()
+
+    # Run harness
+    result = run_harness(only=only)
+
+    # Load baseline if provided
+    baseline_checkpoint = None
+    if baseline:
+        baseline_path = Path(baseline)
+        baseline_checkpoint = load_checkpoint(baseline_path)
+        if baseline_checkpoint:
+            console.print(f"[dim]Baseline: {baseline_checkpoint.git_commit}[/dim]")
+
+    # Display compact summary
+    summary = generate_compact_scorecard(result, baseline_checkpoint)
+    console.print(f"\n[bold]{summary}[/bold]\n")
+
+    # Display alignment table
+    if result.alignment.by_variable:
+        table = Table(title="Alignment by Variable")
+        table.add_column("Variable", style="cyan")
+        table.add_column("Section")
+        table.add_column("PolicyEngine", justify="right")
+        table.add_column("Consensus", justify="right")
+
+        for var_name, var_align in sorted(result.alignment.by_variable.items()):
+            pe = f"{var_align.policyengine * 100:.1f}%" if var_align.policyengine else "-"
+            cons = f"{var_align.consensus * 100:.1f}%"
+            table.add_row(var_name, var_align.section, pe, cons)
+
+        console.print(table)
+
+    # Display quality issues
+    if result.quality.issues:
+        console.print(f"\n[yellow]Quality Issues: {len(result.quality.issues)}[/yellow]")
+        for issue in result.quality.issues[:5]:
+            icon = "✗" if issue.severity == "error" else "⚠"
+            console.print(f"  {icon} {issue.file}:{issue.line}: {issue.message}")
+        if len(result.quality.issues) > 5:
+            console.print(f"  ... and {len(result.quality.issues) - 5} more")
+
+    # Save output if requested
+    if output:
+        output_path = Path(output)
+        save_checkpoint(result, output_path)
+        console.print(f"\n[green]Results saved to {output}[/green]")
+
+
+@harness.command("checkpoint")
+@click.option("--save", "-s", type=click.Path(), help="Save current state as checkpoint")
+@click.option("--name", "-n", default="latest", help="Checkpoint name (default: latest)")
+def harness_checkpoint(save, name):
+    """Save or manage checkpoints.
+
+    Example:
+        cosilico-validators harness checkpoint --save baselines/main.json
+        cosilico-validators harness checkpoint --name main
+    """
+    from cosilico_validators.harness.runner import run_harness
+    from cosilico_validators.harness.checkpoint import save_baseline, get_baseline_path
+
+    if save:
+        console.print(f"[bold]Saving checkpoint to {save}[/bold]")
+        result = run_harness()
+        from cosilico_validators.harness.checkpoint import save_checkpoint
+
+        save_checkpoint(result, Path(save))
+        console.print(f"[green]Saved![/green]")
+    else:
+        # Save to named baseline
+        console.print(f"[bold]Saving checkpoint: {name}[/bold]")
+        result = run_harness()
+        path = save_baseline(result, name)
+        console.print(f"[green]Saved to {path}[/green]")
+
+
+@harness.command("compare")
+@click.option("--baseline", "-b", type=click.Path(exists=True), required=True, help="Baseline checkpoint")
+@click.option("--current", "-c", type=click.Path(), help="Current checkpoint (default: run now)")
+def harness_compare(baseline, current):
+    """Compare current state against baseline.
+
+    Example:
+        cosilico-validators harness compare -b baselines/main.json
+    """
+    from cosilico_validators.harness.runner import run_harness
+    from cosilico_validators.harness.checkpoint import (
+        load_checkpoint,
+        compare_checkpoints,
+        Checkpoint,
+    )
+
+    console.print(f"\n[bold]Comparing against baseline[/bold]")
+
+    # Load baseline
+    baseline_cp = load_checkpoint(Path(baseline))
+    if not baseline_cp:
+        raise click.ClickException(f"Could not load baseline: {baseline}")
+
+    console.print(f"Baseline: {baseline_cp.git_commit} ({baseline_cp.timestamp[:10]})")
+
+    # Get current
+    if current:
+        current_cp = load_checkpoint(Path(current))
+        if not current_cp:
+            raise click.ClickException(f"Could not load current: {current}")
+    else:
+        console.print("Running validation...")
+        result = run_harness()
+        current_cp = Checkpoint.from_result(result)
+
+    console.print(f"Current: {current_cp.git_commit}\n")
+
+    # Compare
+    delta = compare_checkpoints(baseline_cp, current_cp)
+
+    # Display comparison table
+    table = Table(title="Comparison")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Before", justify="right")
+    table.add_column("After", justify="right")
+    table.add_column("Delta", justify="right")
+
+    def format_delta(d):
+        if abs(d) < 0.001:
+            return "-"
+        color = "green" if d > 0 else "red"
+        return f"[{color}]{d * 100:+.1f}%[/{color}]"
+
+    table.add_row(
+        "Alignment",
+        f"{baseline_cp.scores.get('alignment', 0) * 100:.1f}%",
+        f"{current_cp.scores.get('alignment', 0) * 100:.1f}%",
+        format_delta(delta.alignment_delta),
+    )
+    table.add_row(
+        "Coverage",
+        f"{baseline_cp.scores.get('coverage', 0) * 100:.1f}%",
+        f"{current_cp.scores.get('coverage', 0) * 100:.1f}%",
+        format_delta(delta.coverage_delta),
+    )
+    table.add_row(
+        "Quality",
+        f"{baseline_cp.scores.get('quality', 0) * 100:.1f}%",
+        f"{current_cp.scores.get('quality', 0) * 100:.1f}%",
+        format_delta(delta.quality_delta),
+    )
+
+    console.print(table)
+
+    if delta.has_regression():
+        console.print("\n[yellow]Warning: Regression detected[/yellow]")
+    else:
+        console.print("\n[green]No regressions[/green]")
+
+
+@harness.command("scorecard")
+@click.option("--before", "-b", type=click.Path(exists=True), help="Before checkpoint")
+@click.option("--after", "-a", type=click.Path(exists=True), help="After checkpoint (or run now)")
+@click.option("--output", "-o", type=click.Path(), help="Output markdown file")
+def harness_scorecard(before, after, output):
+    """Generate PR scorecard.
+
+    Example:
+        cosilico-validators harness scorecard -b main.json -a current.json -o scorecard.md
+    """
+    from cosilico_validators.harness.runner import run_harness
+    from cosilico_validators.harness.checkpoint import load_checkpoint, Checkpoint
+    from cosilico_validators.harness.scorecard import generate_scorecard
+
+    console.print(f"\n[bold]Generating Scorecard[/bold]\n")
+
+    # Load before checkpoint
+    baseline = None
+    if before:
+        baseline = load_checkpoint(Path(before))
+
+    # Get after result
+    if after:
+        after_cp = load_checkpoint(Path(after))
+        if not after_cp:
+            raise click.ClickException(f"Could not load: {after}")
+        # Reconstruct result from checkpoint details
+        # For now, just run fresh
+        result = run_harness()
+    else:
+        result = run_harness()
+
+    # Generate scorecard
+    scorecard = generate_scorecard(result, baseline)
+
+    if output:
+        with open(output, "w") as f:
+            f.write(scorecard)
+        console.print(f"[green]Scorecard saved to {output}[/green]")
+    else:
+        console.print(scorecard)
+
+
 if __name__ == "__main__":
     cli()

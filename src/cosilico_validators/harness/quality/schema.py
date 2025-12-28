@@ -1,0 +1,158 @@
+"""Schema validation for .rac files.
+
+Checks:
+- Valid entity types: Person, TaxUnit, Household, Family
+- Valid period types: Year, Month, Day
+- Valid dtype types: Money, Rate, Boolean, Integer, Enum[...]
+- No hardcoded literals (only -1, 0, 1, 2, 3 allowed)
+"""
+
+import re
+from pathlib import Path
+
+from .. import QualityIssue
+
+
+# Valid values for schema fields
+VALID_ENTITIES = {"Person", "TaxUnit", "Household", "Family"}
+VALID_PERIODS = {"Year", "Month", "Day"}
+VALID_DTYPES = {"Money", "Rate", "Boolean", "Integer", "Count", "String"}
+ALLOWED_INTEGERS = {-1, 0, 1, 2, 3}
+
+# Regex patterns
+ENTITY_PATTERN = re.compile(r"^\s*entity:\s*(\w+)")
+PERIOD_PATTERN = re.compile(r"^\s*period:\s*(\w+)")
+DTYPE_PATTERN = re.compile(r"^\s*dtype:\s*(\w+)")
+FORMULA_START = re.compile(r"^\s*formula:\s*\|")
+FORMULA_LINE = re.compile(r"^\s{4,}")  # Indented lines in formula
+
+# Pattern to find literals in formulas
+# Matches integers > 3 or any float
+LITERAL_PATTERN = re.compile(
+    r"""
+    (?<![a-zA-Z_])  # Not preceded by identifier char
+    (
+        \d+\.\d+    # Float like 0.075
+        |
+        [4-9]\d*    # Integer 4+
+        |
+        [1-9]\d{1,} # Integer 10+
+    )
+    (?![a-zA-Z_])   # Not followed by identifier char
+    """,
+    re.VERBOSE,
+)
+
+
+def check_schema(rac_files: list[Path]) -> tuple[list[QualityIssue], bool, bool]:
+    """Check schema validity of .rac files.
+
+    Returns:
+        Tuple of (issues, no_literals_pass, all_dtypes_valid)
+    """
+    issues: list[QualityIssue] = []
+    has_literal_issues = False
+    has_dtype_issues = False
+
+    for rac_file in rac_files:
+        try:
+            content = rac_file.read_text()
+            lines = content.split("\n")
+        except Exception as e:
+            issues.append(
+                QualityIssue(
+                    file=str(rac_file),
+                    line=None,
+                    category="schema",
+                    severity="error",
+                    message=f"Could not read file: {e}",
+                )
+            )
+            continue
+
+        in_formula = False
+
+        for i, line in enumerate(lines, 1):
+            # Track if we're in a formula block
+            if FORMULA_START.match(line):
+                in_formula = True
+                continue
+            elif in_formula and not FORMULA_LINE.match(line) and line.strip():
+                in_formula = False
+
+            # Check entity
+            entity_match = ENTITY_PATTERN.match(line)
+            if entity_match:
+                entity = entity_match.group(1)
+                if entity not in VALID_ENTITIES:
+                    issues.append(
+                        QualityIssue(
+                            file=str(rac_file),
+                            line=i,
+                            category="schema",
+                            severity="error",
+                            message=f"Invalid entity '{entity}'. Must be one of: {VALID_ENTITIES}",
+                        )
+                    )
+                    has_dtype_issues = True
+
+            # Check period
+            period_match = PERIOD_PATTERN.match(line)
+            if period_match:
+                period = period_match.group(1)
+                if period not in VALID_PERIODS:
+                    issues.append(
+                        QualityIssue(
+                            file=str(rac_file),
+                            line=i,
+                            category="schema",
+                            severity="error",
+                            message=f"Invalid period '{period}'. Must be one of: {VALID_PERIODS}",
+                        )
+                    )
+                    has_dtype_issues = True
+
+            # Check dtype
+            dtype_match = DTYPE_PATTERN.match(line)
+            if dtype_match:
+                dtype = dtype_match.group(1)
+                # Handle Enum[...] specially
+                if not (dtype in VALID_DTYPES or dtype.startswith("Enum")):
+                    issues.append(
+                        QualityIssue(
+                            file=str(rac_file),
+                            line=i,
+                            category="schema",
+                            severity="error",
+                            message=f"Invalid dtype '{dtype}'. Must be one of: {VALID_DTYPES} or Enum[...]",
+                        )
+                    )
+                    has_dtype_issues = True
+
+            # Check for hardcoded literals in formulas
+            if in_formula:
+                # Skip comments and strings
+                code_line = re.sub(r"#.*$", "", line)  # Remove comments
+                code_line = re.sub(r"['\"].*?['\"]", "", code_line)  # Remove strings
+
+                for match in LITERAL_PATTERN.finditer(code_line):
+                    literal = match.group(1)
+                    # Check if it's an allowed integer
+                    try:
+                        if "." not in literal and int(literal) in ALLOWED_INTEGERS:
+                            continue
+                    except ValueError:
+                        pass
+
+                    issues.append(
+                        QualityIssue(
+                            file=str(rac_file),
+                            line=i,
+                            category="literal",
+                            severity="error",
+                            message=f"Hardcoded literal '{literal}' found. Use a parameter instead.",
+                        )
+                    )
+                    has_literal_issues = True
+
+    return issues, not has_literal_issues, not has_dtype_issues
