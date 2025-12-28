@@ -36,10 +36,19 @@ policyengine = [
     "policyengine-core>=3.20",
 ]
 taxsim = [
-    # TAXSIM accessed via web service, no package needed
+    # TAXSIM accessed via web API (default) or local executable
+    # Web API requires no additional dependencies
+    # Local executable requires download from https://taxsim.nber.org/taxsim35/
+]
+yale = [
+    # Yale Tax-Simulator is R-based, requires:
+    # - R 4.0+ installed
+    # - Tax-Simulator repo cloned from https://github.com/Budget-Lab-Yale/Tax-Simulator
+    # - R packages: tidyverse, yaml, data.table
 ]
 psl = [
     "taxcalc>=4.0",
+    "behresp>=0.10",  # Required by taxcalc for behavioral response estimation
 ]
 all = [
     "cosilico-validators[policyengine,psl]",
@@ -70,3 +79,6 @@ ignore = ["E501", "B905", "SIM115"]  # Allow long lines, zip without strict, tem
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests as requiring network access (deselect with '-m \"not integration\"')",
+]

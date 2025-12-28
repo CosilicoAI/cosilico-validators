@@ -315,7 +315,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "taxcalc", marker = "extra == 'psl'", specifier = ">=4.0" },
 ]
-provides-extras = ["policyengine", "taxsim", "psl", "all", "dev"]
+provides-extras = ["policyengine", "taxsim", "yale", "psl", "all", "dev"]
 
 [[package]]
 name = "coverage"
