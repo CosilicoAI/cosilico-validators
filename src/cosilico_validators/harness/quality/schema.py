@@ -14,8 +14,8 @@ from .. import QualityIssue
 
 
 # Valid values for schema fields
-VALID_ENTITIES = {"Person", "TaxUnit", "Household", "Family"}
-VALID_PERIODS = {"Year", "Month", "Day"}
+VALID_ENTITIES = {"Person", "TaxUnit", "Household", "Family", "TanfUnit", "SnapUnit"}
+VALID_PERIODS = {"Year", "Month", "Week", "Day"}
 VALID_DTYPES = {"Money", "Rate", "Boolean", "Integer", "Count", "String"}
 ALLOWED_INTEGERS = {-1, 0, 1, 2, 3}
 
