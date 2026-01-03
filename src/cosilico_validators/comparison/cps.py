@@ -3,8 +3,9 @@
 Compares weighted totals from Cosilico's CPS calculations against
 PolicyEngine, TAXSIM, and other validators.
 
-Variable mappings are loaded from variable_mappings.yaml, which references
-statute definitions in cosilico-us (e.g., 26/32/eitc.rac::earned_income_tax_credit).
+Variable mappings are loaded from variable_mappings.yaml, which uses
+fully qualified RAC references (e.g., us:statute/26/32#eitc).
+Labels are read from RAC files via the rac.RACRegistry.
 """
 
 import sys
@@ -17,19 +18,44 @@ from typing import Optional
 import numpy as np
 import yaml
 
+# Try to import RAC registry for label lookups
+try:
+    from rac import RACRegistry
+    _RAC_REGISTRY: Optional[RACRegistry] = None
+
+    def _get_registry() -> RACRegistry:
+        global _RAC_REGISTRY
+        if _RAC_REGISTRY is None:
+            _RAC_REGISTRY = RACRegistry()
+            rac_us_path = Path.home() / "CosilicoAI" / "rac-us"
+            if rac_us_path.exists():
+                _RAC_REGISTRY.load_jurisdiction("us", rac_us_path)
+        return _RAC_REGISTRY
+
+    HAS_RAC = True
+except ImportError:
+    HAS_RAC = False
+
+    def _get_registry():
+        return None
+
 
 def load_variable_mappings() -> dict[str, dict]:
     """Load variable mappings from YAML file.
 
-    The statute field is the source of truth for Cosilico variables.
-    Format: {title}/{section}/{file}.rac::{formula_name}
-    The formula_name after :: is used as the output column name.
+    Keys use fully qualified RAC reference syntax:
+        {jurisdiction}:statute/{title}/{section}#{variable_name}
+
+    Example: "us:statute/26/32#eitc" maps to rac-us/statute/26/32.rac variable eitc
+
+    Labels are fetched from RAC files when the rac package is available.
 
     Returns:
-        Dict mapping variable names to their configurations, including:
-        - title: Human-readable name
-        - statute: Path to statute definition (e.g., 26/32/eitc.rac::earned_income_tax_credit)
-        - cosilico_col: Derived from statute (the formula name after ::)
+        Dict mapping RAC references to their configurations, including:
+        - title: Human-readable name (from RAC label or YAML fallback)
+        - jurisdiction: Country/jurisdiction code (e.g., "us")
+        - statute_path: Path within statute/ (e.g., "26/32")
+        - cosilico_col: Variable name from key (after #)
         - pe_var: Variable name in PolicyEngine
         - tc_var: Variable name in Tax-Calculator
         - ts_var: Variable name in TAXSIM output
@@ -38,16 +64,42 @@ def load_variable_mappings() -> dict[str, dict]:
     with open(yaml_path) as f:
         data = yaml.safe_load(f)
 
+    # Get RAC registry for label lookups
+    registry = _get_registry() if HAS_RAC else None
+
     result = {}
-    for var_name, config in data.get("variables", {}).items():
-        statute = config.get("statute", "")
 
-        # Cosilico column name = variable name from statute (after ::)
-        cosilico_col = statute.split("::")[-1] if "::" in statute else var_name
+    # Load main variables (keyed by full RAC reference)
+    for rac_ref, config in data.get("variables", {}).items():
+        # Parse key: "us:statute/26/32#eitc"
+        # -> jurisdiction="us", statute_path="26/32", var="eitc"
+        jurisdiction = None
+        statute_path = ""
+        cosilico_col = rac_ref
 
-        result[var_name] = {
-            "title": config.get("title", var_name),
-            "statute": statute,
+        if ":" in rac_ref:
+            jurisdiction, rest = rac_ref.split(":", 1)
+            # Remove "statute/" prefix if present
+            if rest.startswith("statute/"):
+                rest = rest[8:]  # len("statute/") = 8
+            if "#" in rest:
+                statute_path, cosilico_col = rest.rsplit("#", 1)
+            else:
+                statute_path = rest
+        elif "#" in rac_ref:
+            statute_path, cosilico_col = rac_ref.rsplit("#", 1)
+
+        # Get label from RAC registry if available, fall back to YAML title
+        title = config.get("title", cosilico_col)
+        if registry:
+            var_info = registry.get_variable(rac_ref)
+            if var_info and var_info.label:
+                title = var_info.label
+
+        result[rac_ref] = {
+            "title": title,
+            "jurisdiction": jurisdiction,
+            "statute_path": statute_path,
             "cosilico_col": cosilico_col,
             "pe_var": config.get("policyengine"),
             "pe_entity": config.get("policyengine_entity", "tax_unit"),
@@ -55,6 +107,22 @@ def load_variable_mappings() -> dict[str, dict]:
             "ts_var": config.get("taxsim"),
             "derived": config.get("derived", False),
         }
+
+    # Load external variables (PE-specific, not in RAC)
+    for var_name, config in data.get("external_variables", {}).items():
+        result[var_name] = {
+            "title": config.get("title", var_name),
+            "jurisdiction": None,
+            "statute_path": None,
+            "cosilico_col": None,
+            "pe_var": config.get("policyengine"),
+            "pe_entity": config.get("policyengine_entity", "tax_unit"),
+            "tc_var": config.get("taxcalc"),
+            "ts_var": config.get("taxsim"),
+            "derived": False,
+            "external": True,
+        }
+
     return result
 
 

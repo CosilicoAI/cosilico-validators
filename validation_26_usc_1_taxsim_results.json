@@ -1,0 +1,66 @@
+{
+  "timestamp": "2025-01-03",
+  "section": "26 USC 1",
+  "variable": "income_tax_before_credits",
+  "validator": "TAXSIM-35",
+  "total_tests": 5,
+  "matches": 4,
+  "match_rate": 0.8,
+  "results": [
+    {
+      "name": "Single filer, $50k wages (2024)",
+      "year": 2023,
+      "wages": 50000,
+      "filing_status": "SINGLE",
+      "expected_taxable_income": 36150,
+      "expected_tax": 4118.0,
+      "taxsim_tax": 4118.0,
+      "difference": 0.0,
+      "matches": true
+    },
+    {
+      "name": "Married filing jointly, $100k wages (2024)",
+      "year": 2023,
+      "wages": 100000,
+      "filing_status": "JOINT",
+      "expected_taxable_income": 72300,
+      "expected_tax": 8236.0,
+      "taxsim_tax": 8236.0,
+      "difference": 0.0,
+      "matches": true
+    },
+    {
+      "name": "Head of household, $75k wages (2024)",
+      "year": 2023,
+      "wages": 75000,
+      "filing_status": "HOH",
+      "expected_taxable_income": 54200,
+      "expected_tax": 6190.0,
+      "taxsim_tax": 6190.0,
+      "difference": 0.0,
+      "matches": true
+    },
+    {
+      "name": "Single filer, high income $250k (2023)",
+      "year": 2023,
+      "wages": 250000,
+      "filing_status": "SINGLE",
+      "expected_taxable_income": 236150,
+      "expected_tax": 54547.0,
+      "taxsim_tax": 54547.0,
+      "difference": 0.0,
+      "matches": true
+    },
+    {
+      "name": "Joint filers, $117.5k wages (2023)",
+      "year": 2023,
+      "wages": 117500,
+      "filing_status": "JOINT",
+      "expected_taxable_income": 89800,
+      "expected_tax": 10411.0,
+      "taxsim_tax": 10371.0,
+      "difference": 40.0,
+      "matches": false
+    }
+  ]
+}

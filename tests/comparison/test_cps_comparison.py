@@ -68,13 +68,26 @@ class TestVariableMapping:
             assert "title" in config, f"{var_name} missing title"
 
     def test_eitc_mapping(self):
-        """EITC maps correctly - column derived from statute."""
+        """EITC maps correctly - key is fully qualified RAC reference."""
         from cosilico_validators.comparison.cps import COMPARISON_VARIABLES
 
-        assert "eitc" in COMPARISON_VARIABLES
-        assert COMPARISON_VARIABLES["eitc"]["statute"] == "26/32.rac::eitc"
-        assert COMPARISON_VARIABLES["eitc"]["cosilico_col"] == "eitc"  # Derived from statute
-        assert COMPARISON_VARIABLES["eitc"]["pe_var"] == "eitc"
+        assert "us:statute/26/32#eitc" in COMPARISON_VARIABLES
+        config = COMPARISON_VARIABLES["us:statute/26/32#eitc"]
+        assert config["jurisdiction"] == "us"
+        assert config["statute_path"] == "26/32"
+        assert config["cosilico_col"] == "eitc"
+        assert config["pe_var"] == "eitc"
+
+    def test_cdcc_mapping(self):
+        """CDCC maps correctly - key is fully qualified RAC reference."""
+        from cosilico_validators.comparison.cps import COMPARISON_VARIABLES
+
+        assert "us:statute/26/21#child_and_dependent_care_credit" in COMPARISON_VARIABLES
+        config = COMPARISON_VARIABLES["us:statute/26/21#child_and_dependent_care_credit"]
+        assert config["jurisdiction"] == "us"
+        assert config["statute_path"] == "26/21"
+        assert config["cosilico_col"] == "child_and_dependent_care_credit"
+        assert config["pe_var"] == "cdcc"
 
 
 class TestCosilicoLoader:
@@ -110,11 +123,11 @@ class TestPolicyEngineLoader:
         """load_policyengine_values returns dict with weight array."""
         from cosilico_validators.comparison.cps import load_policyengine_values
 
-        result = load_policyengine_values(year=2024, variables=["eitc"])
+        result = load_policyengine_values(year=2024, variables=["us:statute/26/32#eitc"])
 
         assert isinstance(result, dict)
         assert "weight" in result
-        assert "eitc" in result
+        assert "us:statute/26/32#eitc" in result
 
 
 @pytest.mark.integration
@@ -125,18 +138,18 @@ class TestComparison:
         """compare_cps_totals returns dict[str, ComparisonTotals]."""
         from cosilico_validators.comparison.cps import compare_cps_totals, ComparisonTotals
 
-        result = compare_cps_totals(year=2024, variables=["eitc"])
+        result = compare_cps_totals(year=2024, variables=["us:statute/26/32#eitc"])
 
         assert isinstance(result, dict)
-        assert "eitc" in result
-        assert isinstance(result["eitc"], ComparisonTotals)
+        assert "us:statute/26/32#eitc" in result
+        assert isinstance(result["us:statute/26/32#eitc"], ComparisonTotals)
 
     def test_totals_in_reasonable_range(self):
         """Totals should be in billions, matching IRS expectations."""
         from cosilico_validators.comparison.cps import compare_cps_totals
 
-        result = compare_cps_totals(year=2024, variables=["eitc"])
-        eitc = result["eitc"]
+        result = compare_cps_totals(year=2024, variables=["us:statute/26/32#eitc"])
+        eitc = result["us:statute/26/32#eitc"]
 
         # IRS reports ~$60B for EITC
         assert 30e9 < eitc.cosilico_total < 150e9
@@ -151,7 +164,7 @@ class TestDashboardExport:
         """Dashboard export has timestamp, sections, overall."""
         from cosilico_validators.comparison.cps import compare_cps_totals, export_to_dashboard
 
-        comparison = compare_cps_totals(year=2024, variables=["eitc"])
+        comparison = compare_cps_totals(year=2024, variables=["us:statute/26/32#eitc"])
         dashboard = export_to_dashboard(comparison, year=2024)
 
         assert "timestamp" in dashboard
@@ -162,7 +175,7 @@ class TestDashboardExport:
         """Each section has required fields."""
         from cosilico_validators.comparison.cps import compare_cps_totals, export_to_dashboard
 
-        comparison = compare_cps_totals(year=2024, variables=["eitc"])
+        comparison = compare_cps_totals(year=2024, variables=["us:statute/26/32#eitc"])
         dashboard = export_to_dashboard(comparison, year=2024)
 
         section = dashboard["sections"][0]
