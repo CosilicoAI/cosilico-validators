@@ -31,8 +31,8 @@ class ComparisonResult:
 def load_mapping(mapping_path: Optional[Path] = None) -> dict:
     """Load variable mapping from YAML."""
     if mapping_path is None:
-        # Go up from src/cosilico_validators to rac-validators/oracles
-        mapping_path = Path(__file__).parent.parent.parent / "oracles" / "variable_mapping.yaml"
+        # Use the canonical mapping in comparison/
+        mapping_path = Path(__file__).parent / "comparison" / "variable_mappings.yaml"
     with open(mapping_path) as f:
         return yaml.safe_load(f)
 
@@ -48,10 +48,11 @@ def load_pe_oracle(oracle_path: Optional[Path] = None, year: int = 2024) -> pd.D
     # Aggregate to tax unit level
     mapping = load_mapping()
     agg_funcs = {}
-    for var_name, var_info in mapping.get("variables", {}).items():
-        pe_var = var_info.get("pe_var")
+    for rac_path, var_info in mapping.get("variables", {}).items():
+        pe_var = var_info.get("policyengine")
         if pe_var and pe_var in pe.columns:
-            entity = var_info.get("entity", "tax_unit")
+            # Check if person-level entity
+            entity = var_info.get("policyengine_entity", "tax_unit")
             if entity == "person":
                 agg_funcs[pe_var] = "sum"
             else:
@@ -138,9 +139,9 @@ def compare_pe_taxsim(
     taxsim = load_taxsim_oracle(year=taxsim_year)
 
     results = []
-    for var_name, var_info in mapping.get("variables", {}).items():
-        pe_var = var_info.get("pe_var")
-        taxsim_var = var_info.get("taxsim_var")
+    for rac_path, var_info in mapping.get("variables", {}).items():
+        pe_var = var_info.get("policyengine")
+        taxsim_var = var_info.get("taxsim")
 
         if not pe_var or not taxsim_var:
             continue  # Skip if not mapped in both
@@ -158,6 +159,8 @@ def compare_pe_taxsim(
         )
 
         if result:
+            # Use RAC path as variable name for clarity
+            result.variable = rac_path
             results.append(result)
 
     return results

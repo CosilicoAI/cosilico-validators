@@ -43,7 +43,7 @@ variables:
     title: Additional Child Tax Credit (Refundable)
     policyengine: refundable_ctc
     taxcalc: c11070
-    taxsim: actc
+    taxsim: v25  # Refundable CTC portion
 
   "us:statute/26/24#total_child_tax_credit":
     title: Child Tax Credit (Total)
@@ -57,7 +57,7 @@ variables:
     title: Earned Income Tax Credit
     policyengine: eitc
     taxcalc: eitc
-    taxsim: v25
+    taxsim: v23  # Federal EIC (v23), not v25 which is refundable CTC
 
   # § 62 - Adjusted Gross Income
   "us:statute/26/62#adjusted_gross_income":
