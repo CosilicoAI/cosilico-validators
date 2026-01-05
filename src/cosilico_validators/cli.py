@@ -708,5 +708,144 @@ def harness_scorecard(before, after, output):
         console.print(scorecard)
 
 
+@harness.command("quality")
+@click.option("--min-coverage", type=float, default=0, help="Minimum test coverage (0-100, fail if below)")
+@click.option("--no-literals", is_flag=True, help="Fail if any hardcoded literals")
+@click.option("--valid-imports", is_flag=True, help="Fail if any invalid imports")
+@click.option("--output", "-o", type=click.Path(), help="Output JSON file")
+@click.option("--verbose", "-v", is_flag=True, help="Show all issues")
+def harness_quality(min_coverage, no_literals, valid_imports, output, verbose):
+    """Check quality of .rac files with optional thresholds.
+
+    Use in CI to enforce quality standards:
+
+    \b
+    Examples:
+        # Report quality (no enforcement)
+        cosilico-validators harness quality
+
+        # Enforce 10% minimum test coverage
+        cosilico-validators harness quality --min-coverage 10
+
+        # Enforce no hardcoded literals
+        cosilico-validators harness quality --no-literals
+
+        # Full CI check
+        cosilico-validators harness quality --min-coverage 5 --no-literals
+    """
+    from pathlib import Path as P
+    from cosilico_validators.harness.quality import run_quality_checks
+
+    statute_root = P.home() / "CosilicoAI" / "cosilico-us" / "statute"
+
+    console.print(f"\n[bold]Quality Check[/bold]")
+    console.print(f"Statute root: {statute_root}\n")
+
+    result = run_quality_checks(statute_root)
+
+    # Display summary
+    table = Table(title="Quality Metrics")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right")
+    table.add_column("Status", justify="center")
+
+    # Test coverage
+    cov_pct = result.test_coverage * 100
+    cov_status = "✓" if cov_pct >= min_coverage else "✗"
+    cov_color = "green" if cov_pct >= min_coverage else "red"
+    table.add_row(
+        "Test Coverage",
+        f"{cov_pct:.1f}%",
+        f"[{cov_color}]{cov_status}[/{cov_color}]"
+    )
+
+    # No literals
+    lit_status = "✓" if result.no_literals_pass else "✗"
+    lit_color = "green" if result.no_literals_pass else "red"
+    table.add_row(
+        "No Hardcoded Literals",
+        "Pass" if result.no_literals_pass else "Fail",
+        f"[{lit_color}]{lit_status}[/{lit_color}]"
+    )
+
+    # Valid imports
+    imp_status = "✓" if result.all_imports_valid else "✗"
+    imp_color = "green" if result.all_imports_valid else "red"
+    table.add_row(
+        "All Imports Valid",
+        "Pass" if result.all_imports_valid else "Fail",
+        f"[{imp_color}]{imp_status}[/{imp_color}]"
+    )
+
+    # Valid dtypes
+    dtype_status = "✓" if result.all_dtypes_valid else "✗"
+    dtype_color = "green" if result.all_dtypes_valid else "red"
+    table.add_row(
+        "All Dtypes Valid",
+        "Pass" if result.all_dtypes_valid else "Fail",
+        f"[{dtype_color}]{dtype_status}[/{dtype_color}]"
+    )
+
+    # Overall
+    table.add_row(
+        "[bold]Overall Score[/bold]",
+        f"[bold]{result.overall_score:.1f}/100[/bold]",
+        ""
+    )
+
+    console.print(table)
+
+    # Show issues by category
+    if result.issues:
+        from collections import Counter
+        categories = Counter(i.category for i in result.issues)
+        console.print(f"\n[yellow]Issues by category:[/yellow]")
+        for cat, count in categories.most_common():
+            console.print(f"  {cat}: {count}")
+
+    # Show all issues if verbose
+    if verbose and result.issues:
+        console.print(f"\n[bold]All Issues ({len(result.issues)}):[/bold]")
+        for issue in result.issues:
+            icon = "✗" if issue.severity == "error" else "⚠"
+            console.print(f"  {icon} [{issue.category}] {issue.file}:{issue.line}: {issue.message}")
+
+    # Save output if requested
+    if output:
+        import json
+        output_data = {
+            "test_coverage": result.test_coverage,
+            "no_literals_pass": result.no_literals_pass,
+            "all_imports_valid": result.all_imports_valid,
+            "all_dtypes_valid": result.all_dtypes_valid,
+            "overall_score": result.overall_score,
+            "issues_count": len(result.issues),
+            "issues_by_category": dict(Counter(i.category for i in result.issues)),
+        }
+        with open(output, "w") as f:
+            json.dump(output_data, f, indent=2)
+        console.print(f"\n[green]Results saved to {output}[/green]")
+
+    # Check thresholds and exit with appropriate code
+    failures = []
+
+    if min_coverage > 0 and cov_pct < min_coverage:
+        failures.append(f"Test coverage {cov_pct:.1f}% < {min_coverage}% minimum")
+
+    if no_literals and not result.no_literals_pass:
+        failures.append("Hardcoded literals found in formulas")
+
+    if valid_imports and not result.all_imports_valid:
+        failures.append("Invalid imports found")
+
+    if failures:
+        console.print(f"\n[red bold]CI Check Failed:[/red bold]")
+        for f in failures:
+            console.print(f"  ✗ {f}")
+        raise SystemExit(1)
+    elif min_coverage > 0 or no_literals or valid_imports:
+        console.print(f"\n[green]All CI checks passed![/green]")
+
+
 if __name__ == "__main__":
     cli()

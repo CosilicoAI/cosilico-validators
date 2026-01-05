@@ -600,6 +600,49 @@ def run_export(year: int = 2024, output_path: Optional[Path] = None) -> dict:
                     print(f"    Standard Deduction engine failed: {e}")
                     implemented = False
 
+            # Taxable Income engine integration - 26 USC Section 63
+            # taxable_income = max(0, AGI - deductions - exemptions)
+            # Uses standard_deduction from 26/63/c and itemized from 26/63/d
+            # Personal exemption suspended 2018-2025 by TCJA Section 11041
+            elif var_name == "taxable_income" and engine_available:
+                try:
+                    # First, compute standard_deduction via engine (reusing existing code)
+                    std_ded_rac = Path.home() / "CosilicoAI" / "cosilico-us" / "statute" / "26" / "63" / "c.rac"
+                    if std_ded_rac.exists():
+                        rac_code = std_ded_rac.read_text()
+                        std_inputs = {
+                            'filing_status': np.where(dataset.is_joint, 'JOINT', 'SINGLE'),
+                            'max_age': np.maximum(dataset.head_age, dataset.spouse_age),
+                            'any_blind': dataset.head_is_blind | dataset.spouse_is_blind,
+                            'is_dependent': dataset.head_is_dependent,
+                            'earned_income': dataset.earned_income,
+                            'is_ineligible_for_standard_deduction': np.zeros(dataset.n_records, dtype=bool),
+                        }
+                        executor = VectorizedExecutor(parameters=STD_DEDUCTION_PARAMS_2024)
+                        std_results = executor.execute(
+                            code=rac_code,
+                            inputs=std_inputs,
+                            output_variables=['standard_deduction_standalone']
+                        )
+                        cos_std_deduction = std_results['standard_deduction_standalone']
+
+                        # Get itemized deductions from PE
+                        pe_itemized = np.array(sim.calculate("itemized_taxable_income_deductions", year))
+
+                        # Per 26 USC 63(e): Use larger of standard or itemized
+                        # (optimal behavior for taxpayer)
+                        deductions = np.maximum(cos_std_deduction, pe_itemized)
+
+                        # Per 26 USC 63(a), (b): taxable_income = AGI - deductions - exemptions
+                        # Personal exemption = 0 for 2024 (TCJA Section 11041 suspension)
+                        cos_values = np.maximum(0, dataset.adjusted_gross_income - deductions)
+                        implemented = True
+                except Exception as e:
+                    print(f"    Taxable Income engine failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    implemented = False
+
             if not implemented:
                 # Return zeros for unimplemented variables
                 cos_func = lambda ds: np.zeros(ds.n_records)

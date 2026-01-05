@@ -1,0 +1,35 @@
+[
+  {
+    "name": "Single $50k income",
+    "inputs": {
+      "filing_status": "SINGLE",
+      "taxable_income": 50000
+    },
+    "expected": {
+      "federal_income_tax": 6939.5
+    },
+    "citation": "26 USC 1(j)(2)(C)"
+  },
+  {
+    "name": "MFJ $100k income",
+    "inputs": {
+      "filing_status": "JOINT",
+      "taxable_income": 100000
+    },
+    "expected": {
+      "federal_income_tax": 13879
+    },
+    "citation": "26 USC 1(j)(2)(A)"
+  },
+  {
+    "name": "HoH $60k income",
+    "inputs": {
+      "filing_status": "HEAD_OF_HOUSEHOLD",
+      "taxable_income": 60000
+    },
+    "expected": {
+      "federal_income_tax": 7748
+    },
+    "citation": "26 USC 1(j)(2)(B)"
+  }
+]
