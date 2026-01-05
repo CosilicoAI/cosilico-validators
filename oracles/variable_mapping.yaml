@@ -1,0 +1,138 @@
+# Variable Mapping: Cosilico RAC ↔ PolicyEngine ↔ TAXSIM
+#
+# This file defines the correspondence between:
+# - RAC paths: Cosilico statute encodings (e.g., statute/26/32#eitc)
+# - PE vars: PolicyEngine variable names
+# - TAXSIM vars: TAXSIM output variable codes
+#
+# When a new statute is encoded, add its variables here.
+# Validation automatically compares any variables that have mappings.
+
+variables:
+  # ===================
+  # INCOME CONCEPTS
+  # ===================
+
+  adjusted_gross_income:
+    rac_path: statute/26/62#adjusted_gross_income
+    pe_var: adjusted_gross_income
+    taxsim_var: v19  # Federal AGI
+    entity: tax_unit
+    description: "26 USC § 62 - Adjusted Gross Income"
+
+  taxable_income:
+    rac_path: statute/26/63#taxable_income
+    pe_var: taxable_income
+    taxsim_var: v13  # Taxable income
+    entity: tax_unit
+    description: "26 USC § 63 - Taxable Income"
+
+  employment_income:
+    rac_path: null  # Input variable, not a statute
+    pe_var: employment_income
+    taxsim_var: null  # Input as pwages/swages
+    entity: person
+    description: "Wages and salary income"
+
+  # ===================
+  # DEDUCTIONS
+  # ===================
+
+  standard_deduction:
+    rac_path: statute/26/63/c#standard_deduction
+    pe_var: standard_deduction
+    taxsim_var: null  # Not directly output
+    entity: tax_unit
+    description: "26 USC § 63(c) - Standard Deduction"
+
+  # ===================
+  # CREDITS
+  # ===================
+
+  eitc:
+    rac_path: statute/26/32#eitc
+    pe_var: eitc
+    taxsim_var: v23  # Federal EIC
+    entity: tax_unit
+    description: "26 USC § 32 - Earned Income Tax Credit"
+
+  ctc:
+    rac_path: statute/26/24#ctc
+    pe_var: ctc
+    taxsim_var: null  # Split between v24 and v25
+    entity: tax_unit
+    description: "26 USC § 24 - Child Tax Credit (total)"
+
+  ctc_refundable:
+    rac_path: statute/26/24#refundable_ctc
+    pe_var: refundable_ctc
+    taxsim_var: v25  # Refundable portion (Additional CTC)
+    entity: tax_unit
+    description: "26 USC § 24 - Refundable Child Tax Credit"
+
+  ctc_nonrefundable:
+    rac_path: statute/26/24#non_refundable_ctc
+    pe_var: non_refundable_ctc
+    taxsim_var: v24  # Non-refundable portion
+    entity: tax_unit
+    description: "26 USC § 24 - Non-refundable Child Tax Credit"
+
+  cdcc:
+    rac_path: statute/26/21#cdcc
+    pe_var: cdcc
+    taxsim_var: null  # Not in basic TAXSIM output
+    entity: tax_unit
+    description: "26 USC § 21 - Child and Dependent Care Credit"
+
+  # ===================
+  # TAXES
+  # ===================
+
+  income_tax:
+    rac_path: statute/26/1#income_tax
+    pe_var: income_tax
+    taxsim_var: fiitax  # Federal income tax liability
+    entity: tax_unit
+    description: "26 USC § 1 - Income Tax (after credits)"
+
+  income_tax_before_credits:
+    rac_path: statute/26/1#income_tax_before_credits
+    pe_var: income_tax_before_credits
+    taxsim_var: null  # Not directly output
+    entity: tax_unit
+    description: "26 USC § 1 - Tax before credits"
+
+  payroll_tax:
+    rac_path: statute/26/3101#payroll_tax
+    pe_var: payroll_tax
+    taxsim_var: tfica  # Total FICA (employee + employer)
+    entity: person
+    description: "26 USC § 3101 - FICA Payroll Taxes"
+
+  employee_social_security_tax:
+    rac_path: statute/26/3101/a#employee_social_security_tax
+    pe_var: employee_social_security_tax
+    taxsim_var: null  # Part of fica
+    entity: person
+    description: "Social Security employee portion"
+
+  employee_medicare_tax:
+    rac_path: statute/26/3101/b#employee_medicare_tax
+    pe_var: employee_medicare_tax
+    taxsim_var: null  # Part of fica
+    entity: person
+    description: "Medicare employee portion"
+
+# Entity-level aggregation rules
+aggregation:
+  person:
+    method: sum  # Sum person-level values to tax unit
+  tax_unit:
+    method: max  # Take max for tax-unit level (same for all members)
+  household:
+    method: max
+
+# Tolerance for comparison
+tolerances:
+  default: 10  # $10 absolute difference
+  percentage: 0.01  # 1% relative difference

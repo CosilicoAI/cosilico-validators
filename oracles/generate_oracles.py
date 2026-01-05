@@ -135,6 +135,12 @@ def generate_taxsim_oracle(years: list[int], output_dir: Path) -> None:
     is_dep = np.array(sim.calculate("is_tax_unit_dependent", pop_year))
     emp_income = np.array(sim.calculate("employment_income", pop_year))
     se_income = np.array(sim.calculate("self_employment_income", pop_year))
+    # Additional income sources
+    interest_income = np.array(sim.calculate("taxable_interest_income", pop_year))
+    dividend_income = np.array(sim.calculate("qualified_dividend_income", pop_year))
+    ss_income = np.array(sim.calculate("social_security", pop_year))
+    pension_income = np.array(sim.calculate("taxable_pension_income", pop_year))
+    ui_income = np.array(sim.calculate("unemployment_compensation", pop_year))
 
     print(f"  Population: {len(unique_tu):,} tax units from {pop_year} CPS")
 
@@ -157,6 +163,11 @@ def generate_taxsim_oracle(years: list[int], output_dir: Path) -> None:
             tu_is_dep = is_dep[mask]
             tu_emp = emp_income[mask]
             tu_se = se_income[mask]
+            tu_interest = interest_income[mask]
+            tu_dividend = dividend_income[mask]
+            tu_ss = ss_income[mask]
+            tu_pension = pension_income[mask]
+            tu_ui = ui_income[mask]
 
             # Primary filer
             head_idx = tu_is_head.argmax() if tu_is_head.any() else 0
@@ -167,19 +178,33 @@ def generate_taxsim_oracle(years: list[int], output_dir: Path) -> None:
             if has_spouse:
                 spouse_idx = tu_is_spouse.argmax()
                 sage = int(tu_ages[spouse_idx])
-                swages = float(tu_emp[spouse_idx] + tu_se[spouse_idx])
+                swages = float(tu_emp[spouse_idx])
+                ssemp = float(tu_se[spouse_idx])
             else:
                 sage = 0
                 swages = 0
+                ssemp = 0
 
-            # Dependents
-            depx = int(tu_is_dep.sum())
+            # Dependents - count by age for CTC/EITC
+            dep_ages = tu_ages[tu_is_dep]
+            depx = int(tu_is_dep.sum())  # Total dependents for exemptions
+            dep17 = int((dep_ages < 17).sum())  # Qualifying children under 17
+            dep18 = int((dep_ages < 18).sum())  # Children under 18
+            dep13 = int((dep_ages < 13).sum())  # Children under 13 for CDCC
 
-            # Primary wages
-            pwages = float(tu_emp[head_idx] + tu_se[head_idx]) if len(tu_emp) > 0 else 0
+            # Primary income - separate wages from self-employment
+            pwages = float(tu_emp[head_idx]) if len(tu_emp) > 0 else 0
+            psemp = float(tu_se[head_idx]) if len(tu_se) > 0 else 0
 
             # Filing status: 1=single, 2=married filing jointly
             mstat = 2 if has_spouse else 1
+
+            # Aggregate other income sources
+            intrec = float(tu_interest.sum())  # Taxable interest
+            dividends = float(tu_dividend.sum())  # Dividends
+            pensions = float(tu_pension.sum())  # Taxable pensions
+            gssi = float(tu_ss.sum())  # Social security gross
+            ui = float(tu_ui.sum())  # Unemployment compensation
 
             tu_data.append({
                 "taxsimid": tu_id,
@@ -189,8 +214,19 @@ def generate_taxsim_oracle(years: list[int], output_dir: Path) -> None:
                 "page": max(1, min(page, 120)),
                 "sage": max(0, min(sage, 120)),
                 "depx": min(depx, 20),
+                "dep17": min(dep17, 10),  # Qualifying children under 17
+                "dep18": min(dep18, 10),  # Children under 18
+                "dep13": min(dep13, 10),  # Children under 13 (CDCC)
                 "pwages": max(0, pwages),
                 "swages": max(0, swages),
+                "psemp": max(0, psemp),  # Primary self-employment
+                "ssemp": max(0, ssemp),  # Spouse self-employment
+                "intrec": max(0, intrec),  # Taxable interest
+                "dividends": max(0, dividends),  # Qualified dividends
+                "pensions": max(0, pensions),  # Taxable pensions
+                "gssi": max(0, gssi),  # Social security
+                "ui": max(0, ui),  # Unemployment compensation
+                "idtl": 2,  # Extended output (includes EITC, CTC)
             })
 
         taxsim_input = pd.DataFrame(tu_data)
